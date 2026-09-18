@@ -1,0 +1,504 @@
+# Verilator harness for the SGI core.
+#
+# Cross-platform (macOS / Linux / MinGW) SDL2 + OpenGL2 + Dear ImGui, using the
+# standard MiSTer verilator sim framework in sim/ (sim_bus, sim_console,
+# sim_video, sim_input, sim_audio, sim_serial, sim_blkdevice, sim_clock).
+#
+# Build:  make            Run: ./obj_dir/Vemu
+# macOS deps: brew install verilator sdl2
+
+V     = verilator
+TOP   = --top-module emu
+RTL   = ../rtl
+V_INC = +incdir+$(RTL)
+
+V_DEFINE = +define+SIMULATION=1 \
+	-CFLAGS "-I../sim/imgui -I../sim/vinc -I../sim/ -g" \
+	--timescale-override 1ps/1ps -Wno-TIMESCALEMOD \
+	-I$(RTL) -I$(RTL)/sgi -I$(RTL)/cpu -I$(RTL)/newport \
+	--timing
+
+# Warnings that don't affect simulation correctness in this style of RTL.
+V_DEFINE += -Wno-WIDTH -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-IMPLICIT -Wno-PINMISSING \
+            -Wno-UNUSEDSIGNAL -Wno-UNOPTFLAT -Wno-CASEINCOMPLETE -Wno-UNSIGNED \
+            -Wno-CMPCONST -Wno-LATCH -Wno-UNDRIVEN -Wno-MISINDENT -Wno-COMBDLY \
+            -Wno-INITIALDLY -Wno-SYNCASYNCNET -Wno-ALWNEVER -Wno-PROCASSWIRE \
+            -Wno-BLKANDNBLK -Wno-MULTIDRIVEN
+V_DEFINE += --trace-fst
+
+UNAME_S := $(shell uname -s)
+
+ifeq ($(UNAME_S), Darwin)
+	LIBS += -framework OpenGL -framework Cocoa -framework IOKit -framework CoreVideo `sdl2-config --libs`
+	LIBS += -L/usr/local/lib -L/opt/local/lib -L/opt/homebrew/lib
+	CXXFLAGS += `sdl2-config --cflags` -Iimgui
+	CXXFLAGS += `sdl2-config --cflags | sed 's|include/SDL2|include/|'`
+	CXXFLAGS += -I/usr/local/include -I/opt/local/include -I/opt/homebrew/include
+	CFLAGS = $(CXXFLAGS) -Iimgui
+endif
+
+ifeq ($(UNAME_S), Linux)
+	LIBS += -lGL -ldl `sdl2-config --libs`
+	CXXFLAGS += `sdl2-config --cflags` -Iimgui
+	CFLAGS = $(CXXFLAGS)
+endif
+
+ifeq ($(findstring MINGW,$(UNAME_S)),MINGW)
+	LIBS += -lgdi32 -lopengl32 -limm32 `pkg-config --static --libs sdl2`
+	CXXFLAGS += `pkg-config --cflags sdl2`
+	CFLAGS = $(CXXFLAGS)
+endif
+
+CFLAGS  += $(CC_OPT) $(CC_DEFINE) -Iimgui
+LDFLAGS  = $(LIBS)
+EXE      = ./obj_dir/Vemu
+V_OPT    = --x-assign fast --x-initial fast --noassert
+
+# --- RTL under test -------------------------------------------------------
+# sim.v is the simulation wrapper (module `emu`) that instantiates the core the
+# same way sgiindy.sv does on hardware, but with sim_ram.v in place of SDRAM
+# and the PROM fed from the C++ side.
+V_SRC = \
+	sim.v \
+	sim_ram.v \
+	$(RTL)/sgi/sgi_mc.v \
+	$(RTL)/sgi/z8530_scc.sv
+#	$(RTL)/cpu/aoR3000.v          <- add once the CPU is wired in
+#	$(RTL)/sgi/sgi_int2.sv
+#	$(RTL)/sgi/sgi_ds1386.sv
+#	$(RTL)/sgi/sgi_hpc3.sv
+
+C_SRC = \
+	sim_main.cpp \
+	sim/sim_bus.cpp sim/sim_blkdevice.cpp sim/sim_clock.cpp sim/sim_console.cpp \
+	sim/sim_video.cpp sim/sim_input.cpp sim/sim_audio.cpp sim/sim_serial.cpp \
+	sim/imgui/imgui_impl_sdl.cpp sim/imgui/imgui_impl_opengl2.cpp sim/imgui/imgui_draw.cpp \
+	sim/imgui/imgui_widgets.cpp sim/imgui/imgui_tables.cpp sim/imgui/imgui.cpp \
+	sim/imgui/ImGuiFileDialog.cpp sim/imgui/implot.cpp sim/imgui/implot_items.cpp
+
+VOUT = obj_dir/Vemu.cpp
+
+all: $(EXE)
+
+$(VOUT): $(V_SRC) Makefile
+	$V -cc $(V_OPT) -LDFLAGS "$(LDFLAGS) " -exe --trace --Mdir ./obj_dir \
+	   $(V_DEFINE) $(V_INC) $(TOP) -CFLAGS $(CFLAGS) $(V_SRC) $(C_SRC)
+
+$(EXE): $(VOUT) $(C_SRC)
+	(cd obj_dir; make -f Vemu.mk)
+
+clean:
+	rm -rf obj_dir
+
+# --- headless CPU-validation harness --------------------------------------
+# No SDL, no ImGui, no window: this is the target CI and bisection use.
+#   make cputest
+#   ./obj_dir/Vsim_top --elf .../cputest.elf --testdev
+CPUTEST_V = \
+	sim_top.sv \
+	sim_ram.v \
+	$(RTL)/sgi/sgi_indy.sv \
+	$(RTL)/sgi/sgi_mc.sv \
+	$(RTL)/sgi/mc_gio_dma.sv \
+	$(RTL)/sgi/sgi_hpc3.sv \
+	$(RTL)/sgi/hal2.sv \
+	$(RTL)/sgi/hpc3_scsi_dma.sv \
+	$(RTL)/sgi/sgi_ioc.sv \
+	$(RTL)/sgi/i8042.sv \
+	$(RTL)/scsi/sgi_scsi.sv \
+	$(RTL)/scsi/scsi_cache.sv \
+	$(RTL)/scsi/wd33c93.sv \
+	$(RTL)/scsi/scsi.v \
+	$(RTL)/scsi/cd_audio.sv \
+	$(RTL)/sgi/pit8254.sv \
+	$(RTL)/sgi/ram_arb.sv \
+	$(RTL)/sgi/sgi_memmap.sv \
+	$(RTL)/sgi/sgi_ds1386.sv \
+	$(RTL)/sgi/eeprom_93c56.sv \
+	$(RTL)/sgi/sgi_scc.sv \
+	$(RTL)/sgi/z8530_scc.sv \
+	$(RTL)/newport/newport.sv \
+	$(RTL)/newport/np_rex3.sv \
+	$(RTL)/newport/np_vc2.sv \
+	$(RTL)/newport/np_xmap9.sv \
+	$(RTL)/newport/np_cmap.sv \
+	$(RTL)/newport/np_bt445.sv \
+	$(RTL)/cpu/r4300_bus.sv \
+	$(RTL)/cpu/generated/r4300_wrap.v
+
+CPUTEST_C = sim_cputest.cpp sim_devices.cpp
+
+CPUTEST_W = +incdir+$(RTL)/scsi -Wno-WIDTH -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-UNSIGNED -Wno-CMPCONST \
+            -Wno-UNUSEDSIGNAL -Wno-UNOPTFLAT -Wno-CASEINCOMPLETE -Wno-DECLFILENAME \
+            -Wno-PINCONNECTEMPTY -Wno-VARHIDDEN -Wno-SYNCASYNCNET
+
+$(RTL)/cpu/generated/r4300_wrap.v:
+	../tools/gen_r4300_verilog.sh
+
+# WM_OPT rather than -O3 since 2026-09-02: the per-target scsi_sd_lba /
+# scsi_sd_buff_din arrays (the docs/29 last-match-wins fix) tipped -O3 into
+# the same no-location Verilator 5.020 internal fault the wholemachine and
+# cputest-rex3-debug targets already work around. WM_OPT is defined below
+# with those targets; it costs about 2x in sim speed and is the flag set
+# that is known to elaborate this whole design.
+cputest: $(RTL)/cpu/generated/r4300_wrap.v
+	$V -cc --exe --build -j 0 --Mdir ./obj_dir --top-module sim_top \
+	   $(WM_OPT) -CFLAGS "-O2 -std=c++17 -I.." $(WM_W) \
+	   --x-assign fast --x-initial fast --noassert \
+	   -o Vsim_top $(CPUTEST_V) $(CPUTEST_C)
+
+
+# --- the SCSI block cache's own bench (docs/design/scsi-block-cache.md) -----------------------------
+# rtl/scsi/scsi_cache.sv against an engine-like requester and a slow device
+# model with random latency: prefetch, write-behind, re-base, passthrough,
+# mount invalidation, a random mix, the installer's burst, multi-block
+# transactions, and the OSD bypass. Ported with the module from
+# MacQuadra800_MiSTer; --binary --timing because the bench is procedural.
+#   make -C verilator tb_scsi_cache
+TBC_W = -Wno-fatal -Wno-WIDTH -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-UNSIGNED -Wno-CMPCONST \
+        -Wno-DECLFILENAME -Wno-CASEINCOMPLETE -Wno-BLKSEQ -Wno-MULTIDRIVEN -Wno-SYNCASYNCNET -Wno-COMBDLY
+tb_scsi_cache:
+	$V --binary --timing $(TBC_W) +define+SIMULATION=1 +define+VERILATOR=1 +incdir+$(RTL)/scsi \
+	   --top-module tb_scsi_cache --Mdir ./obj_dir_tbc -o tb_scsi_cache \
+	   tb_scsi_cache.sv $(RTL)/scsi/scsi_cache.sv
+	./obj_dir_tbc/tb_scsi_cache
+
+# --- the DS1386 against the MiSTer's clock (docs/design/r4600-accuracy-clock-disk.md) --------------------------
+# rtl/sgi/sgi_ds1386.sv's time registers loaded from hps_io's RTC: every field,
+# the 1940-based year, the weekday, a time sent during reset, resets keeping the
+# time, and software writes still winning.
+#   make -C verilator tb_ds1386
+tb_ds1386:
+	$V --binary --timing $(TBC_W) --top-module tb_ds1386 --Mdir ./obj_dir_tbrtc -o tb_ds1386 \
+	   tb_ds1386.sv $(RTL)/sgi/sgi_ds1386.sv
+	./obj_dir_tbrtc/tb_ds1386
+
+# --- the 93C56 configuration EEPROM (build 37) --------------------------------
+# rtl/sgi/eeprom_93c56.sv driven the way the PROM drives it, against a shadow
+# copy: power-up contents, WREN/WRITE/WRDS and the ready poll, every word at
+# three host speeds, ERASE, WRAL/ERAL, reset, and a random mix. The array is an
+# M10K since build 37 (registered read, one registered write port).
+#   make -C verilator tb_eeprom
+tb_eeprom:
+	$V --binary --timing $(TBC_W) --top-module tb_eeprom --Mdir ./obj_dir_tbee -o tb_eeprom \
+	   tb_eeprom.sv $(RTL)/sgi/eeprom_93c56.sv
+	./obj_dir_tbee/tb_eeprom
+
+# --- the HPC3 register file against a shadow of the spec's map ---------------
+# rtl/sgi/sgi_hpc3.sv is the decode plus the storage behind it: descriptor
+# pairs, control groups, gen, cfgdma, cfgpio. The bench keeps its own copy of
+# what the map says every access does - including the two blocks whose stride
+# puts one register in both halves of a doubleword - and does not check the
+# acknowledge's latency, so a version whose storage is an M10K a clock further
+# away passes the same stimulus as one made of flip-flops.
+#   make -C verilator tb_hpc3
+#   make -C verilator tb_hpc3 HPC3=/tmp/sgi_hpc3_old.sv   (another version of it)
+HPC3 ?= $(RTL)/sgi/sgi_hpc3.sv
+tb_hpc3:
+	$V --binary --timing $(TBC_W) --unroll-count 2048 --unroll-stmts 20000 --top-module tb_hpc3 --Mdir ./obj_dir_tbhpc3 -o tb_hpc3 \
+	   tb_hpc3.sv $(HPC3) $(RTL)/sgi/hpc3_scsi_dma.sv $(RTL)/sgi/hal2.sv
+	./obj_dir_tbhpc3/tb_hpc3
+
+
+# The bench in the shape sgi_scsi.sv instantiates since build 27: the CD slot
+# cached with a 64-sector window and multi-block on (CACHE_CD = 1, SECT2 = 64,
+# MB_CD = 1).
+tb_scsi_cache_sgi:
+	$V --binary --timing $(TBC_W) +define+SIMULATION=1 +define+VERILATOR=1 +incdir+$(RTL)/scsi \
+	   +define+CACHE_CD_TB=1 +define+CACHE_S2_TB=64 +define+MB_CD_TB=1 \
+	   --top-module tb_scsi_cache --Mdir ./obj_dir_tbc_sgi -o tb_scsi_cache_sgi \
+	   tb_scsi_cache.sv $(RTL)/scsi/scsi_cache.sv
+	./obj_dir_tbc_sgi/tb_scsi_cache_sgi
+
+# The build 26 shape: the CD slot passes through and has no store (CACHE_CD = 0,
+# SECT2 = 0).
+tb_scsi_cache_nocd:
+	$V --binary --timing $(TBC_W) +define+SIMULATION=1 +define+VERILATOR=1 +incdir+$(RTL)/scsi 	   +define+CACHE_CD_TB=0 +define+CACHE_S2_TB=0 	   --top-module tb_scsi_cache --Mdir ./obj_dir_tbc_nocd -o tb_scsi_cache_nocd 	   tb_scsi_cache.sv $(RTL)/scsi/scsi_cache.sv
+	./obj_dir_tbc_nocd/tb_scsi_cache_nocd
+
+# --- whole-machine headless harness (builds on Verilator 5.020) ------------
+# The same sim_top as `cputest`, but with the three flags that Verilator 5.020
+# needs to get through this design. Each was found by building it, not guessed:
+#   -fno-gate          V3Gate.cpp:693 "No pending substitutions" on scsi.v
+#   -O0                every level above it dies in a later pass with an
+#                      internal fault that prints no location (np_rex3.sv)
+#   --unroll-count     sgi_hpc3.sv:339 resets a 128-entry array in a for loop,
+#                      which is BLKLOOPINIT unless the loop is unrolled
+# plus -Wno-MULTIDRIVEN for the dual-port RAM in the generated CPU.
+# NOTE: rtl/cpu/generated/r4300_wrap.v must be current - a stale one is missing
+# the nine dbg_* ports sgi_indy.sv connects and fails with PINNOTFOUND.
+#   make -C verilator wholemachine
+#   ./obj_wm/Vsim_top --prom ../boot.rom --no-gfx --disk 1=disk.img
+WM_W = $(CPUTEST_W) -Wno-MULTIDRIVEN -Wno-LATCH -Wno-BLKANDNBLK
+WM_OPT = -fno-gate -O0 --unroll-count 2048 --unroll-stmts 20000 	 -finline -flife -flife-post -fconst -fsubst -fsubst-const 	 -fassemble -fcombine -fexpand -fcase -fdedup -freorder -fsplit 	 -fmerge-cond -ftable
+
+# Extra plusargs for either whole-machine target, so a `+define+` does not
+# need the command line spelled out by hand:
+#   make wholemachine2 WM_DEFS=+define+MSG_DEBUG
+# turns on scsi.v's per-message $display, which is the only way to see the
+# bytes IRIX actually puts in a MESSAGE OUT - IRIS cannot show them, its model
+# reads them directly rather than through DMA.
+WM_DEFS =
+
+# A SECOND BUILD DIRECTORY, and it earns its keep. Overwriting a running
+# executable fails with ETXTBSY, so an instrumentation change cannot be
+# compiled while a 28-minute boot is still running out of ./obj_wm - and
+# serialising the two costs half an hour every time. Identical in every other
+# respect; ./obj_wm2/Vsim_top takes the same switches.
+wholemachine2: $(RTL)/cpu/generated/r4300_wrap.v
+	$V -cc --exe --build -j 0 --Mdir ./obj_wm2 --top-module sim_top 	   $(WM_DEFS) $(WM_OPT) -CFLAGS "-O2 -std=c++17 -I$(CURDIR)/.." $(WM_W) 	   --x-assign fast --x-initial fast --noassert 	   -o Vsim_top $(CPUTEST_V) $(CURDIR)/sim_cputest.cpp $(CURDIR)/sim_devices.cpp
+
+wholemachine: $(RTL)/cpu/generated/r4300_wrap.v
+	$V -cc --exe --build -j 0 --Mdir ./obj_wm --top-module sim_top 	   $(WM_OPT) -CFLAGS "-O2 -std=c++17 -I$(CURDIR)/.." $(WM_W) 	   --x-assign fast --x-initial fast --noassert 	   -o Vsim_top $(CPUTEST_V) $(CURDIR)/sim_cputest.cpp $(CURDIR)/sim_devices.cpp
+
+# --- interactive harness ---------------------------------------------------
+# Same sim_top, same C++ device models as `cputest`, plus SDL2 + OpenGL2 +
+# Dear ImGui from the vendored MiSTer sim framework.
+#   make gui && ./obj_dir/Vsim_gui --prom ../roms/IP24_Indy/ip24prom....bin --run
+GUI_C = sim_gui.cpp sim_devices.cpp \
+	sim/imgui/imgui_impl_sdl.cpp sim/imgui/imgui_impl_opengl2.cpp \
+	sim/imgui/imgui_draw.cpp sim/imgui/imgui_widgets.cpp \
+	sim/imgui/imgui_tables.cpp sim/imgui/imgui.cpp
+
+# Paths are relative to obj_dir_gui/, where verilator runs the compile.
+GUI_CFLAGS = -O2 -std=c++17 -I.. -I../.. -I../sim/imgui $(shell sdl2-config --cflags)
+GUI_LDFLAGS = $(shell sdl2-config --libs)
+ifeq ($(UNAME_S), Darwin)
+	GUI_LDFLAGS += -framework OpenGL
+else
+	GUI_LDFLAGS += -lGL
+endif
+
+gui: $(RTL)/cpu/generated/r4300_wrap.v
+	$V -cc --exe --build -j 0 --Mdir ./obj_dir_gui --top-module sim_top \
+	   -O3 -CFLAGS "$(GUI_CFLAGS)" -LDFLAGS "$(GUI_LDFLAGS)" $(CPUTEST_W) \
+	   --x-assign fast --x-initial fast --noassert \
+	   -o ../obj_dir/Vsim_gui $(CPUTEST_V) $(GUI_C)
+
+# --- CPU-only harness -----------------------------------------------------
+# The CPU, r4300_bus and a memory whose latency is a runtime input. Nothing
+# else - and that is the point twice over. It builds where `cputest` does not,
+# because `rtl/scsi/scsi.v` is what Verilator 5.020 dies on (V3Gate.cpp:693),
+# so a machine with only that Verilator can still answer CPU questions. And a
+# settable memory latency is the only way to chase a fault that appears on
+# about one hardware boot in three: on the board, DDR3 refresh, the HPS's own
+# traffic and Newport's frame buffer reads move the answer time around, and
+# nothing in a fixed-latency simulation ever sees the bad one.
+#   make -C verilator cpuonly && ./obj_dir_cpuonly/Vtb_cpuonly
+CPUONLY_V = tb_cpuonly.sv $(RTL)/cpu/r4300_bus.sv $(RTL)/cpu/generated/r4300_wrap.v
+
+# -Wno-PINMISSING: this bench predates the nine dbg_* observability pins on
+# r4300_wrap and deliberately leaves them open - it watches the CPU through the
+# bus, not through the taps. Without it the build stops on nine warnings-as-
+# errors and the bench looks broken when it is only uninterested.
+cpuonly: $(RTL)/cpu/generated/r4300_wrap.v
+	$V -cc --exe --build -j 0 --Mdir ./obj_dir_cpuonly --top-module tb_cpuonly -Wno-PINMISSING 	   -O3 -CFLAGS "-O2 -std=c++17" $(CPUTEST_W) 	   --x-assign fast --x-initial fast --noassert 	   -o Vtb_cpuonly $(CPUONLY_V) tb_cpuonly.cpp
+	./obj_dir_cpuonly/Vtb_cpuonly
+
+# --- HAL2 register file unit test ------------------------------------------
+# The audio processor's IAR/IDR indirect file, checked against IRIS's decode.
+# One check in it is a boot-stopper rather than an audio bug: ISR bit 0 is what
+# the PROM's audio init spins on and it has to stay clear.
+#   make -C verilator hal2test
+hal2test:
+	$V -cc --exe --build -j 0 --Mdir ./obj_dir_hal2 --top-module hal2 	   -O3 -CFLAGS "-O2 -std=c++17" $(CPUTEST_W) 	   --x-assign fast --x-initial fast --noassert 	   -o Vhal2 $(RTL)/sgi/hal2.sv tb_hal2.cpp
+	./obj_dir_hal2/Vhal2
+
+# --- MC GIO64 DMA fill engine unit test ------------------------------------
+# Checks the engine against a C++ transcription of IRIS's own dma_worker loop,
+# at two arbiter ack delays. It is a module test rather than part of cputest
+# because the full design will not build under Verilator 5.020, and this engine
+# is the one that decides whether a boot starts on cleared memory.
+#   make -C verilator mcdmatest
+mcdmatest:
+	$V -cc --exe --build -j 0 --Mdir ./obj_dir_mcdma --top-module mc_gio_dma 	   -O3 -CFLAGS "-O2 -std=c++17" $(CPUTEST_W) 	   --x-assign fast --x-initial fast --noassert 	   -o Vmc_gio_dma $(RTL)/sgi/mc_gio_dma.sv tb_mcdma.cpp
+	./obj_dir_mcdma/Vmc_gio_dma
+
+# --- VC2 video timing generator unit test ---------------------------------
+# The timing generator is an interpreter for a table in VC2's external SRAM.
+# This drives it directly with a table of a known geometry, so a wrong picture
+# in a boot can be attributed to the walk or ruled out of it.
+#   make vc2test && ./obj_dir_vc2/Vnp_vc2
+vc2test:
+	$V -cc --exe --build -j 0 --Mdir ./obj_dir_vc2 --top-module np_vc2 \
+	   -O3 -CFLAGS "-O2 -std=c++17 -I.." $(CPUTEST_W) \
+	   --x-assign fast --x-initial fast --noassert \
+	   -o Vnp_vc2 $(RTL)/newport/np_vc2.sv tb_vc2.cpp
+
+# --- the same harness with REX3's per-command trace ------------------------
+# np_rex3.sv's `ifdef REX3_DEBUG block prints one line per accepted GO: the
+# drawmode words, the two corners, the octant, the z-pattern and the colour.
+# A wrong picture is nearly always a command the engine was given rather than
+# one it mishandled, and ng1_tp.c is right there to compare against.
+#   make cputest-rex3-debug && ./obj_dir_rex3dbg/Vsim_top --prom ... 2>&1 | less
+# WM_OPT rather than -O3: every optimisation level above -O0 dies in a
+# Verilator 5.020 internal fault just after np_rex3.sv (the same fault the
+# wholemachine targets work around), and this target elaborates the same
+# whole design. See the WM_OPT comment above.
+cputest-rex3-debug: $(RTL)/cpu/generated/r4300_wrap.v
+	$V -cc --exe --build -j 0 --Mdir ./obj_dir_rex3dbg --top-module sim_top \
+	   $(WM_OPT) -CFLAGS "-O2 -std=c++17 -I.." $(WM_W) +define+REX3_DEBUG \
+	   --x-assign fast --x-initial fast --noassert \
+	   -o Vsim_top $(CPUTEST_V) $(CPUTEST_C)
+
+# --- the same harness with the Display Control Bus traced -----------------
+# np_rex3.sv and np_cmap.sv's `ifdef DCB_DEBUG blocks print one line per DCB
+# transfer - chip address, register select, width, swap and the whole 32-bit
+# datum - and one per byte the colour map receives. Everything on the Newport
+# board except REX3 is reached through that bus, so when a palette, a mode
+# table or a timing table is wrong this is the only place the wrongness is
+# visible: the transfer either carried the byte or it did not.
+#   make cputest-dcb-debug && ./obj_dir_dcbdbg/Vsim_top --prom ... 2>&1 | less
+# WM_OPT for the same reason as cputest above.
+cputest-dcb-debug: $(RTL)/cpu/generated/r4300_wrap.v
+	$V -cc --exe --build -j 0 --Mdir ./obj_dir_dcbdbg --top-module sim_top \
+	   $(WM_OPT) -CFLAGS "-O2 -std=c++17 -I.." $(WM_W) +define+DCB_DEBUG \
+	   --x-assign fast --x-initial fast --noassert \
+	   -o Vsim_top $(CPUTEST_V) $(CPUTEST_C)
+
+# --- DDR3 mux unit test ----------------------------------------------------
+# The MiSTer memory path is the one part of the top level that has behaviour
+# rather than wiring, and no Quartus is needed to check it. The bridge model in
+# tb_ddr3.cpp is deliberately unhelpful - random BUSY, random read latency,
+# garbage on DOUT except on the ready cycle - because a mux that passes against
+# a bridge that is never busy is a mux that has not been tested.
+#   make ddr3test && ./obj_dir_ddr3/Vddr3_mux
+# --- the CPU/DMA memory arbiter against a SLOW memory ----------------------
+# The one piece of this design that could not be tested until it was its own
+# file. Every whole-machine simulation here answers memory in one cycle, and
+# the fault it hid opens a window as wide as memory is slow. See the header
+# of verilator/tb_ramarb.cpp and of rtl/sgi/ram_arb.sv.
+#   make ramarbtest && ./obj_dir_ramarb/Vram_arb
+#   RAMARB_LAT=60 ./obj_dir_ramarb/Vram_arb    # DDR3-ish
+#   RAMARB_LAT=1  ./obj_dir_ramarb/Vram_arb    # what sim_ram.v offers
+ramarbtest:
+	$V -cc --exe --build -j 0 --Mdir ./obj_dir_ramarb --top-module ram_arb \
+	   -O3 -CFLAGS "-O2 -std=c++17 -I.." $(CPUTEST_W) \
+	   --x-assign fast --x-initial fast --noassert \
+	   -o Vram_arb $(RTL)/sgi/ram_arb.sv tb_ramarb.cpp
+
+# -Wno-LATCH: the round-robin pick declares its candidate inside the for loop
+# of an always_comb, which Verilator 5.020 reads as a latch; WM_W carries the
+# same waiver for the whole machine.
+ddr3test:
+	$V -cc --exe --build -j 0 --Mdir ./obj_dir_ddr3 --top-module ddr3_mux \
+	   -O3 -CFLAGS "-O2 -std=c++17 -I.." $(CPUTEST_W) -Wno-LATCH \
+	   --x-assign fast --x-initial fast --noassert \
+	   -o Vddr3_mux $(RTL)/mister/ddr3_mux.sv tb_ddr3.cpp
+
+# The same bench with the display's bursts split into 3-word reads. Written
+# when the shipping FBR_SUB was 16, which the bench's 1-16-word display bursts
+# never split; the shipping value is 4 since docs/design/r4600-accuracy-clock-disk.md, so `ddr3test` splits
+# them too and this is the odd-sized case.
+ddr3test_sub:
+	$V -cc --exe --build -j 0 --Mdir ./obj_dir_ddr3sub --top-module ddr3_mux \
+	   -GFBR_SUB=3 -GFBR_AHEAD=2 \
+	   -O3 -CFLAGS "-O2 -std=c++17 -I.." $(CPUTEST_W) -Wno-LATCH \
+	   --x-assign fast --x-initial fast --noassert \
+	   -o Vddr3_mux $(RTL)/mister/ddr3_mux.sv tb_ddr3.cpp
+
+# --- frame buffer line cache unit test -------------------------------------
+# Driven with the display's REAL access pattern - n1280_r3's 1318 of 1680
+# pixels and 1024 of 1065 lines, blanking included - against a memory that
+# accepts a burst late and returns it in gaps. A cache tested with random
+# addresses would be a different cache.
+#   make linecachetest && ./obj_dir_lcache/Vfb_linecache
+# --- the whole display fetch path: two caches + the arbiter -----------------
+# Against a bridge that latches the request when first seen and issues it
+# later, like ddr3_mux does - the behaviour that deadlocked build 17's
+# arbiter and that neither single-module test could see.
+#   make fetcharbtest && ./obj_dir_fetcharb/Vtb_fetcharb
+fetcharbtest:
+	$V -cc --exe --build -j 0 --Mdir ./obj_dir_fetcharb --top-module tb_fetcharb \
+	   -O3 -CFLAGS "-O2 -std=c++17 -I.." $(CPUTEST_W) \
+	   --x-assign fast --x-initial fast --noassert \
+	   -o Vtb_fetcharb tb_fetcharb.sv $(RTL)/mister/fb_linecache.sv \
+	   $(RTL)/mister/fb_fetch_arb.sv tb_fetcharb.cpp
+
+linecachetest:
+	$V -cc --exe --build -j 0 --Mdir ./obj_dir_lcache --top-module fb_linecache \
+	   -GTRACK_ZERO=1 \
+	   -O3 -CFLAGS "-O2 -std=c++17 -I.." $(CPUTEST_W) \
+	   --x-assign fast --x-initial fast --noassert \
+	   -o Vfb_linecache $(RTL)/mister/fb_linecache.sv tb_linecache.cpp
+
+# --- the rasteriser against a memory that is not always ready ---------------
+# tests/run-rex3.sh is the strong test of WHAT REX3 draws - every command
+# replayed against every pixel - but it runs on sim_top, whose memory accepts a
+# request every single cycle and never refuses one. rtl/mister/ddr3_mux.sv
+# refuses constantly: it holds one transaction at a time and takes tens of
+# cycles over it. This drives np_rex3 on its own against that contract and
+# checks that a filled rectangle actually reaches memory.
+#   make rex3test && ./obj_dir_rex3/Vnp_rex3
+#   REX3_ACK_DELAY=40 ./obj_dir_rex3/Vnp_rex3     # DDR3-ish
+#   REX3_ACK_DELAY=0  ./obj_dir_rex3/Vnp_rex3     # the memory sim_top has
+#   REX3_MAP=1        ./obj_dir_rex3/Vnp_rex3     # print the coverage map
+rex3test:
+	$V -cc --exe --build -j 0 --Mdir ./obj_dir_rex3 --top-module np_rex3 	   -O3 -CFLAGS "-O2 -std=c++17 -I.." $(CPUTEST_W) 	   --x-assign fast --x-initial fast --noassert 	   -o Vnp_rex3 $(RTL)/newport/np_rex3.sv tb_rex3.cpp
+
+# --- the rasteriser against IRIS's rasteriser -------------------------------
+# tb_rex3.cpp asks whether the writes reach memory; this asks whether they are
+# the RIGHT writes, against a transcription of iris/src/rex3_generic.rs. It
+# runs every non-host draw shape in IRIS's own corpus of what a real IRIX
+# desktop asked REX3 for, then a field-level random walk over the modes.
+# Regenerate rex3_corpus.h from a newer IRIS with:
+#   python3 ../tools/rex3_corpus.py --iris ../../iris -o rex3_corpus.h
+#   make rex3draw
+#   REX3D_CASES=20000 ./obj_dir_rex3draw/Vnp_rex3draw
+#   REX3D_SEED=7 REX3D_VERBOSE=1 ./obj_dir_rex3draw/Vnp_rex3draw
+rex3draw:
+	$V -cc --exe --build -j 0 --Mdir ./obj_dir_rex3draw --top-module np_rex3 -O3 -CFLAGS "-O2 -std=c++17 -I.." $(CPUTEST_W) --x-assign fast --x-initial fast --noassert -o Vnp_rex3draw $(RTL)/newport/np_rex3.sv tb_rex3draw.cpp
+	./obj_dir_rex3draw/Vnp_rex3draw
+
+# --- Newport at its own bus: the CPU's and the MC's transactions (docs/design/rex3-source-audit.md) ---
+# tb_rex3 and tb_rex3draw drive np_rex3's 32-bit register port, which sits
+# downstream of newport.sv's doubleword handling - where docs/design/rex3-source-audit.md 3.1 lives.
+# These drive newport.sv itself (REX3, VC2, both XMAP9s, both CMAPs, the
+# BT445) with the CPU's real 32- and 64-bit loads and stores (r4300_bus.sv's
+# byte lanes), GO aliases, reads behind a running primitive, and VDMA beats
+# with the start byte in the address, against a 16 MB frame buffer model.
+# verilator/tb_newport.h has the bus contract; tb_newport.cpp the tests.
+#   make newporttest       the directed tests. Several are expected to fail
+#                          before build 44 and say so; the exit status counts
+#                          only the others unless NEWPORT_STRICT=1
+#   ./obj_dir_newport/Vnewport_test --fb-lat 20 --strict 2 5
+#   make newportreplay     the RX3TRACE replay (tb_newport_replay.cpp), then its
+#                          self-test on a synthetic trace from tools/rx3trace.py
+#   ./obj_dir_npreplay/Vnewport_replay TRACE -o OUT --iris-rgb 'IRIS/rgb_%04u.bin' --iris-aux 'IRIS/aux_%04u.bin'
+# -O3 builds for this top: the Verilator 5.020 internal fault the whole-machine
+# targets work around with WM_OPT is not hit by newport.sv on its own.
+# --verilate-jobs 1: once in some forty builds 5.020 died at exit, after a good
+# build, with "attempted to destroy locked Thread Pool"; without verilation
+# worker threads there is nothing left to race, and newport verilates in seconds.
+NEWPORT_V = $(RTL)/newport/newport.sv $(RTL)/newport/np_rex3.sv $(RTL)/newport/np_vc2.sv $(RTL)/newport/np_xmap9.sv $(RTL)/newport/np_cmap.sv $(RTL)/newport/np_bt445.sv
+NEWPORT_OPT = -O3
+NPREPLAY_SYNTH = ./obj_dir_npreplay/synth
+NPREPLAY_IRIS = --iris-rgb $(NPREPLAY_SYNTH)/iris_rgb_%04u.bin --iris-aux $(NPREPLAY_SYNTH)/iris_aux_%04u.bin
+
+newporttest:
+	$V -cc --exe --build --build-jobs 0 --verilate-jobs 1 --Mdir ./obj_dir_newport --top-module newport $(NEWPORT_OPT) -CFLAGS "-O2 -std=c++17 -I.." $(CPUTEST_W) --x-assign fast --x-initial fast --noassert -o Vnewport_test $(NEWPORT_V) tb_newport.cpp
+	./obj_dir_newport/Vnewport_test
+
+# The self-test: the synthetic trace as the RTL is (marker 2 differs - the
+# doubleword store of docs/design/rex3-source-audit.md 3.1), then with the bench splitting doublewords,
+# where every marker must match IRIS's expected dumps.
+newportreplay:
+	$V -cc --exe --build --build-jobs 0 --verilate-jobs 1 --Mdir ./obj_dir_npreplay --top-module newport $(NEWPORT_OPT) -CFLAGS "-O2 -std=c++17 -I.." -LDFLAGS "-lz" $(CPUTEST_W) --x-assign fast --x-initial fast --noassert -o Vnewport_replay $(NEWPORT_V) tb_newport_replay.cpp
+	python3 ../tools/rx3trace.py synth $(NPREPLAY_SYNTH)
+	./obj_dir_npreplay/Vnewport_replay $(NPREPLAY_SYNTH)/synth.rx3 -o $(NPREPLAY_SYNTH)/asis $(NPREPLAY_IRIS)
+	./obj_dir_npreplay/Vnewport_replay $(NPREPLAY_SYNTH)/synth.rx3 -o $(NPREPLAY_SYNTH)/split64 --split64 --fail-on-diff $(NPREPLAY_IRIS)
+
+.PHONY: newporttest newportreplay
+
+.PHONY: cputest gui vc2test cputest-rex3-debug cputest-dcb-debug ddr3test linecachetest rex3test rex3draw all clean
+
+# --- the same harness with the DMA engine's per-cycle state trace ----------
+# hpc3_scsi_dma.sv's `ifdef DMA_DEBUG block is silent and free in the normal
+# build; this target turns it on into its own obj_dir so the ratchets keep
+# running against the quiet binary. One line per cycle - redirect it.
+#   make cputest-dma-debug && ./obj_dir_dmadbg/Vsim_top --elf ... 2>&1 | less
+cputest-dma-debug: $(RTL)/cpu/generated/r4300_wrap.v
+	$V -cc --exe --build -j 0 --Mdir ./obj_dir_dmadbg --top-module sim_top \
+	   -O3 -CFLAGS "-O2 -std=c++17 -I.." $(CPUTEST_W) +define+DMA_DEBUG \
+	   --x-assign fast --x-initial fast --noassert \
+	   -o Vsim_top $(CPUTEST_V) $(CPUTEST_C)

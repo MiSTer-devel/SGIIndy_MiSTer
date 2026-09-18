@@ -1,0 +1,873 @@
+//============================================================================
+//  sim_gui - interactive Verilator harness: SDL2 + OpenGL2 + Dear ImGui.
+//
+//  Drives the SAME sim_top and the SAME C++ device models as the headless
+//  sim_cputest harness. That is deliberate: a GUI that wrapped a different top
+//  level would drift, and then "it works in the GUI" would stop meaning
+//  anything about what CI runs.
+//
+//  It is a port of the DE1 sandbox's ImGui harness, which was Win32 + DirectX
+//  11 and so could not be lifted across; the panels and the reasons for them
+//  are the same, the platform layer is the MiSTer sim framework's SDL2 +
+//  OpenGL2 backend that this repository already vendors.
+//
+//  LAYOUT. This is the core ImGui, not the docking branch, so there is no
+//  dockspace to drop panels into - they are plain windows, tiled by hand the
+//  first time the program runs and the user's business after that. Positions
+//  and sizes are remembered in imgui.ini beside the working directory; the
+//  View menu has a Reset layout that puts them back, which is the escape
+//  hatch when a window ends up somewhere its resize grip cannot be reached.
+//
+//  Panels:
+//    Control        run / stop / step / reset, cycle rate, cpu_error flags
+//    Console        what the machine printed, and a box to type back at it
+//    Bus trace      a rolling window with decoded register names
+//    Holes          unclaimed addresses - the live map of what is missing
+//    Hot            what the CPU is hammering, which is what a hang looks like
+//    Memory         RAM and PROM hex editors
+//    PROM patches   runtime word patches, for "what if this returned X"
+//
+//  TYPING AT THE MACHINE. The console input is a real UART transmitter on
+//  rxdb, not a back door into the SCC's FIFO, so the receiver, the baud rate
+//  generator and the RX FIFO all have to work for a keystroke to arrive. The
+//  bit time is not configured: it is measured from the machine's own
+//  transmitter (see UartRx below), so whatever the PROM programs into WR12/13
+//  is automatically what the harness sends at.
+//============================================================================
+
+#include "Vsim_top.h"
+#include "verilated.h"
+#include "sim_devices.h"
+#include "sim_scsi.h"
+#include "sim_uart.h"
+#include "sim_ps2.h"
+#include "sim_video_cap.h"
+
+#include <SDL.h>
+#include <SDL_opengl.h>
+#include "imgui.h"
+#include "imgui_impl_sdl.h"
+#include "imgui_impl_opengl2.h"
+#include "imgui_memory_editor.h"
+
+#include <cstdio>
+#include <cstring>
+#include <cstdlib>
+#include <string>
+#include <vector>
+#include <map>
+#include <deque>
+#include <algorithm>
+
+using namespace sgisim;
+
+static const uint64_t SCLK_DIV = 4;
+
+// ---- MMIO names, same table as the headless harness ----------------------
+struct RegName { uint32_t lo, hi; const char *name; };
+static const RegName kRegNames[] = {
+    { 0x08000000, 0x0FFFFFFF, "RAM"            },
+    { 0x00000000, 0x0007FFFF, "RAM-alias"      },
+    { 0x1F000000, 0x1F0EFFFF, "GFX-low"        },
+    { 0x1F0F0000, 0x1F0FFFFF, "NEWPORT-REX3"   },
+    { 0x1F400000, 0x1F5FFFFF, "GIO0"           },
+    { 0x1FA00000, 0x1FA000FF, "MC"             },
+    { 0x1FA00100, 0x1FA00FFF, "MC-lock"        },
+    { 0x1FA01000, 0x1FA01FFF, "MC-RPSS_CTR"    },
+    { 0x1FA02000, 0x1FA02FFF, "MC-GIO-DMA"     },
+    { 0x1FA10000, 0x1FA1FFFF, "MC-semaphore"   },
+    { 0x1FB80000, 0x1FB8FFFF, "HPC3-PBUS-DMA"  },
+    { 0x1FB90000, 0x1FB93FFF, "HPC3-SCSI-DMA"  },
+    { 0x1FB94000, 0x1FB97FFF, "HPC3-ENET-DMA"  },
+    { 0x1FB98000, 0x1FB9FFFF, "HPC3-ENET-BDP"  },
+    { 0x1FBB0000, 0x1FBB00FF, "HPC3-MISC"      },
+    { 0x1FBC0000, 0x1FBCFFFF, "WD33C93-SCSI"   },
+    { 0x1FBD4000, 0x1FBD4FFF, "SEEQ-ENET"      },
+    { 0x1FBD8000, 0x1FBD83FF, "HAL2"           },
+    { 0x1FBD8400, 0x1FBD87FF, "HPC3-PBUS-PIO1" },
+    { 0x1FBD9000, 0x1FBD97FF, "HPC3-PBUS-PIO"  },
+    { 0x1FBD9800, 0x1FBD982F, "IOC"            },
+    { 0x1FBD9830, 0x1FBD9833, "SCC1_CMD"       },
+    { 0x1FBD9834, 0x1FBD9837, "SCC1_DATA"      },
+    { 0x1FBD9838, 0x1FBD983B, "SCC2_CMD"       },
+    { 0x1FBD983C, 0x1FBD983F, "SCC2_DATA"      },
+    { 0x1FBD9840, 0x1FBD987F, "IOC"            },
+    { 0x1FBD9880, 0x1FBD98FF, "INT2"           },
+    { 0x1FBD9900, 0x1FBD9FFF, "HPC3-EXT-IO"    },
+    { 0x1FBDC000, 0x1FBDCFFF, "HPC3-CFG-DMA"   },
+    { 0x1FBDD000, 0x1FBDDFFF, "HPC3-CFG-PIO"   },
+    { 0x1FBE0000, 0x1FBE00FF, "DS1386-RTC"     },
+    { 0x1FBE0100, 0x1FBE7FFF, "DS1386-NVRAM"   },
+    { 0x1FBE8000, 0x1FBFFFFF, "HPC3"           },
+    { 0x1FC00000, 0x1FC7FFFF, "PROM"           },
+};
+
+// Overlap, not containment: bus cycles are doubleword aligned even for a byte
+// access, so a containment test silently never fires for a byte poll.
+static const char *reg_name(uint32_t addr)
+{
+    uint32_t lo = addr, hi = addr + 7;
+    for (const RegName &r : kRegNames)
+        if (lo <= r.hi && hi >= r.lo) return r.name;
+    return "?";
+}
+
+static const char *const kErrorNames[6] = {
+    "instr(unimpl-cache-op)", "stall(pipeline-wedged)", "FPU-exception",
+    "CPU-exception", "fifo-overflow", "TLB-busy"
+};
+
+// ---- one traced bus transaction ------------------------------------------
+struct Txn {
+    uint64_t cycle;
+    uint32_t addr;
+    uint64_t data;
+    uint8_t  be;
+    bool     we;
+};
+
+struct Hole { uint64_t count = 0, first = 0, last = 0; bool r = false, w = false; };
+
+// A PROM word patch. The sandbox kept a list of these ("NOP the call at
+// 0x1FC00560") as a map of where it had got stuck; they are answers to "would
+// it get further if this went away", not fixes, so they live in the harness
+// and never in the image on disk.
+struct Patch { uint32_t addr; uint32_t value; bool enabled; char note[48]; };
+
+static void usage()
+{
+    fprintf(stderr,
+        "usage: Vsim_gui [options]\n"
+        "  --prom FILE       load a boot PROM image at 0x1FC00000\n"
+        "  --elf FILE        load a bare-metal ELF and boot from its entry point\n"
+        "  --boot-pc HEX     override the reset PC (default 0xBFC00000)\n"
+        "  --testdev         fit the IRIS test device in GIO64 slot 0\n"
+        "  --ram-mb N        main memory size (default 64)\n"
+        "  --disk ID=PATH    attach a SCSI disk image at target ID (default 1),\n"
+        "                    read-only: writes are kept in memory for the run\n"
+        "  --disk-rw ID=PATH the same, but writes go through to the host file\n"
+        "  --run             start running immediately\n");
+}
+
+
+// SDL physical scancode -> PS/2 set-2 code, for the keys a US keyboard has in
+// the main block. SDL scancodes are already positional (USB HID order), so
+// this is a straight table rather than anything locale-dependent. `ext` marks
+// the codes a real keyboard prefixes with 0xE0.
+static bool sdl_to_ps2(int sc, uint8_t &code, bool &ext)
+{
+    struct Map { int sc; uint8_t code; bool ext; };
+    static const Map m[] = {
+        {SDL_SCANCODE_A,0x1C,0},{SDL_SCANCODE_B,0x32,0},{SDL_SCANCODE_C,0x21,0},
+        {SDL_SCANCODE_D,0x23,0},{SDL_SCANCODE_E,0x24,0},{SDL_SCANCODE_F,0x2B,0},
+        {SDL_SCANCODE_G,0x34,0},{SDL_SCANCODE_H,0x33,0},{SDL_SCANCODE_I,0x43,0},
+        {SDL_SCANCODE_J,0x3B,0},{SDL_SCANCODE_K,0x42,0},{SDL_SCANCODE_L,0x4B,0},
+        {SDL_SCANCODE_M,0x3A,0},{SDL_SCANCODE_N,0x31,0},{SDL_SCANCODE_O,0x44,0},
+        {SDL_SCANCODE_P,0x4D,0},{SDL_SCANCODE_Q,0x15,0},{SDL_SCANCODE_R,0x2D,0},
+        {SDL_SCANCODE_S,0x1B,0},{SDL_SCANCODE_T,0x2C,0},{SDL_SCANCODE_U,0x3C,0},
+        {SDL_SCANCODE_V,0x2A,0},{SDL_SCANCODE_W,0x1D,0},{SDL_SCANCODE_X,0x22,0},
+        {SDL_SCANCODE_Y,0x35,0},{SDL_SCANCODE_Z,0x1A,0},
+        {SDL_SCANCODE_1,0x16,0},{SDL_SCANCODE_2,0x1E,0},{SDL_SCANCODE_3,0x26,0},
+        {SDL_SCANCODE_4,0x25,0},{SDL_SCANCODE_5,0x2E,0},{SDL_SCANCODE_6,0x36,0},
+        {SDL_SCANCODE_7,0x3D,0},{SDL_SCANCODE_8,0x3E,0},{SDL_SCANCODE_9,0x46,0},
+        {SDL_SCANCODE_0,0x45,0},
+        {SDL_SCANCODE_RETURN,0x5A,0},{SDL_SCANCODE_ESCAPE,0x76,0},
+        {SDL_SCANCODE_BACKSPACE,0x66,0},{SDL_SCANCODE_TAB,0x0D,0},
+        {SDL_SCANCODE_SPACE,0x29,0},{SDL_SCANCODE_MINUS,0x4E,0},
+        {SDL_SCANCODE_EQUALS,0x55,0},{SDL_SCANCODE_LEFTBRACKET,0x54,0},
+        {SDL_SCANCODE_RIGHTBRACKET,0x5B,0},{SDL_SCANCODE_BACKSLASH,0x5D,0},
+        {SDL_SCANCODE_SEMICOLON,0x4C,0},{SDL_SCANCODE_APOSTROPHE,0x52,0},
+        {SDL_SCANCODE_GRAVE,0x0E,0},{SDL_SCANCODE_COMMA,0x41,0},
+        {SDL_SCANCODE_PERIOD,0x49,0},{SDL_SCANCODE_SLASH,0x4A,0},
+        {SDL_SCANCODE_CAPSLOCK,0x58,0},
+        {SDL_SCANCODE_LSHIFT,0x12,0},{SDL_SCANCODE_RSHIFT,0x59,0},
+        {SDL_SCANCODE_LCTRL,0x14,0},{SDL_SCANCODE_RCTRL,0x14,1},
+        {SDL_SCANCODE_LALT,0x11,0},{SDL_SCANCODE_RALT,0x11,1},
+        {SDL_SCANCODE_UP,0x75,1},{SDL_SCANCODE_DOWN,0x72,1},
+        {SDL_SCANCODE_LEFT,0x6B,1},{SDL_SCANCODE_RIGHT,0x74,1},
+        {SDL_SCANCODE_HOME,0x6C,1},{SDL_SCANCODE_END,0x69,1},
+        {SDL_SCANCODE_DELETE,0x71,1},{SDL_SCANCODE_INSERT,0x70,1},
+    };
+    for (const Map &e : m)
+        if (e.sc == sc) { code = e.code; ext = e.ext; return true; }
+    return false;
+}
+
+int main(int argc, char **argv)
+{
+    Verilated::commandArgs(argc, argv);
+
+    std::string prom_path, elf_path;
+    uint32_t boot_pc = 0xBFC00000, ram_mb = 64;
+    // Newport fitted. Off puts the PROM console back on the serial port.
+    bool gfx_present = true;
+    bool testdev = false, start_running = false;
+    struct Mount { int id; std::string path; bool rw; };
+    std::vector<Mount> disks;
+
+    for (int i = 1; i < argc; i++) {
+        std::string a = argv[i];
+        auto next = [&](const char *w) -> const char * {
+            if (i + 1 >= argc) { fprintf(stderr, "%s needs a value\n", w); exit(2); }
+            return argv[++i];
+        };
+        if      (a == "--prom")    prom_path = next("--prom");
+        else if (a == "--elf")     elf_path  = next("--elf");
+        else if (a == "--boot-pc") boot_pc   = strtoul(next("--boot-pc"), nullptr, 0);
+        else if (a == "--testdev") testdev   = true;
+        else if (a == "--no-gfx")  gfx_present = false;
+        else if (a == "--run")     start_running = true;
+        else if (a == "--ram-mb")  ram_mb    = strtoul(next("--ram-mb"), nullptr, 0);
+        else if (a == "--disk") {
+            // --disk ID=PATH, or --disk PATH for ID 1. ID 0 is the host
+            // adapter's own ID on SGI, so a disk never lives there.
+            std::string spec = next("--disk");
+            size_t eq = spec.find('=');
+            int id = 1;
+            if (eq != std::string::npos) { id = atoi(spec.substr(0, eq).c_str()); spec = spec.substr(eq + 1); }
+            if (id < 0 || id > 6) { fprintf(stderr, "--disk: target %d is out of range\n", id); return 2; }
+            disks.push_back({id, spec, false});
+        }
+        else if (a == "--disk-rw") {
+            // Writes go through to the host file. See sim_devices.h.
+            std::string spec = next("--disk-rw");
+            size_t eq = spec.find('=');
+            int id = 1;
+            if (eq != std::string::npos) { id = atoi(spec.substr(0, eq).c_str()); spec = spec.substr(eq + 1); }
+            if (id < 0 || id > 6) { fprintf(stderr, "--disk-rw: target %d is out of range\n", id); return 2; }
+            disks.push_back({id, spec, true});
+        }
+        else if (a == "-h" || a == "--help") { usage(); return 0; }
+        else if (a.rfind("+", 0) == 0 || a.rfind("-V", 0) == 0) { }
+        else { fprintf(stderr, "unknown option %s\n", a.c_str()); usage(); return 2; }
+    }
+
+    g_dev.ram.resize((size_t)ram_mb * 1024 * 1024);
+    g_dev.prom.resize(512 * 1024);
+    g_dev.vram.resize(sgisim::VRAM_BYTES);
+    g_dev.testdev.present = testdev;
+
+    for (auto &d : disks) {
+        if (!g_dev.scsi[d.id].load(d.path, d.rw)) {
+            fprintf(stderr, "cannot open disk %s\n", d.path.c_str());
+            return 2;
+        }
+        printf("SCSI %d: %s (%zu blocks%s)\n", d.id, d.path.c_str(),
+               g_dev.scsi[d.id].blocks(), d.rw ? ", read-write" : "");
+    }
+
+    std::string load_msg;
+    if (!prom_path.empty()) {
+        FILE *f = fopen(prom_path.c_str(), "rb");
+        if (!f) { fprintf(stderr, "cannot open PROM %s\n", prom_path.c_str()); return 2; }
+        size_t n = fread(g_dev.prom.bytes.data(), 1, g_dev.prom.bytes.size(), f);
+        fclose(f);
+        load_msg = "PROM " + prom_path + " (" + std::to_string(n) + " bytes)";
+    }
+    if (!elf_path.empty()) {
+        ElfLoadResult r = load_elf(elf_path);
+        if (!r.ok) { fprintf(stderr, "ELF load failed: %s\n", r.error.c_str()); return 2; }
+        if (boot_pc == 0xBFC00000) boot_pc = r.entry;
+        load_msg = "ELF " + elf_path + " entry " + std::to_string(r.entry);
+    }
+
+    // ---- SDL / GL / ImGui ------------------------------------------------
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) != 0) {
+        fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
+        return 1;
+    }
+    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+    SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
+    SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
+    SDL_Window *window = SDL_CreateWindow(
+        "SGI Indy (IP24) - Verilator", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+        1500, 950, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
+    SDL_GLContext gl = SDL_GL_CreateContext(window);
+    SDL_GL_MakeCurrent(window, gl);
+    SDL_GL_SetSwapInterval(1);
+
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGui::StyleColorsDark();
+    {
+        ImGuiIO &io = ImGui::GetIO();
+        // Resizing by dragging a window edge rather than only the corner grip.
+        // The SDL backend sets ImGuiBackendFlags_HasMouseCursors, which is what
+        // this depends on, but it is worth being explicit about.
+        io.ConfigWindowsResizeFromEdges = true;
+        ImGuiStyle &st = ImGui::GetStyle();
+        st.WindowMenuButtonPosition = ImGuiDir_None;   // reclaim the title bar
+        st.WindowRounding  = 3.0f;
+        st.FrameRounding   = 3.0f;
+        st.ScrollbarSize   = 14.0f;
+        st.GrabMinSize     = 12.0f;
+        // A visible resize grip. The default is nearly transparent, which on
+        // a dark theme reads as "this window cannot be resized".
+        st.Colors[ImGuiCol_ResizeGrip]        = ImVec4(0.35f, 0.55f, 0.85f, 0.45f);
+        st.Colors[ImGuiCol_ResizeGripHovered] = ImVec4(0.45f, 0.65f, 0.95f, 0.85f);
+        st.Colors[ImGuiCol_ResizeGripActive]  = ImVec4(0.55f, 0.75f, 1.00f, 1.00f);
+    }
+    ImGui_ImplSDL2_InitForOpenGL(window, gl);
+    ImGui_ImplOpenGL2_Init();
+
+    // ---- the model -------------------------------------------------------
+    Vsim_top *top = new Vsim_top;
+    top->reset = 1; top->sclk = 0; top->clk = 0;
+    top->boot_pc = boot_pc;
+    top->mem_mb  = ram_mb;
+    top->gio_present = testdev ? 1 : 0;
+    top->gfx_present = gfx_present ? 1 : 0;
+    top->icache_en = 1;
+    top->dcache_en = 1;
+    top->rxdb = 1;
+    top->ps2_key = 0;
+    top->ps2_mouse = 0;
+    Ps2Injector ps2;
+    bool ps2_grab = false;
+    uint8_t mouse_buttons = 0;
+
+    // What the monitor sees, built from the video output pins. See
+    // sim_video_cap.h for why it is the pins and not the frame buffer.
+    VideoCapture vidcap;
+    GLuint vid_tex = 0, vram_tex = 0;
+    std::vector<uint32_t> vram_rgba;
+    bool     vid_show_vram = false;   // raw frame buffer instead of the pins
+    bool     vid_index     = false;   // show the colour index as grey
+    float    vid_zoom      = 0.5f;
+    uint64_t vram_last_upload = 0;
+
+    uint64_t cycle = 0;
+    bool     running = start_running;
+    int      step_batch = 200000;          // cycles per rendered frame
+    bool     step_once = false, step_many = false, do_reset = false;
+
+    std::string console;
+    std::deque<Txn> trace;
+    size_t   trace_cap = 4000;
+    bool     trace_on = true;
+    std::map<uint32_t, uint64_t> hot;
+    std::map<uint32_t, Hole> holes;
+    uint64_t err_count[6] = {0};
+    uint8_t  err_prev = 0;
+    size_t   td_seen = 0;
+    UartRx   urx;
+    UartTx   utx;
+    uint64_t last_cycle_mark = 0;
+    double   cycles_per_sec = 0;
+    uint32_t last_rate_ms = SDL_GetTicks();
+    char     type_buf[256] = {0};
+
+    std::vector<Patch> patches;
+    auto apply_patch = [&](const Patch &p) {
+        if (p.addr < 0x1FC00000 || p.addr + 3 >= 0x1FC00000 + g_dev.prom.size()) return;
+        size_t o = p.addr - 0x1FC00000;
+        g_dev.prom.bytes[o+0] = (p.value >> 24) & 0xFF;
+        g_dev.prom.bytes[o+1] = (p.value >> 16) & 0xFF;
+        g_dev.prom.bytes[o+2] = (p.value >>  8) & 0xFF;
+        g_dev.prom.bytes[o+3] = (p.value      ) & 0xFF;
+    };
+
+    MemoryEditor ram_edit, prom_edit;
+
+    // Which panels are up. The two hex editors are bulky and rarely what you
+    // want while watching a boot, so they start closed.
+    bool show_control = true, show_console = true, show_trace = true;
+    bool show_holes = true, show_hot = true, show_patches = true;
+    bool show_ram = false, show_prom = false, show_display = true;
+
+    // Per-pane section folds. Every pane is an ImGui window and folds at its
+    // title bar; these fold the groups INSIDE a pane, so a pane can be kept
+    // open for the one thing being watched without the rest of it taking the
+    // screen. They are plain bools rather than ImGui's own header state
+    // because the layout code resets them with the layout.
+    bool sec_ctl_load = true, sec_ctl_run = true, sec_ctl_err = true;
+    bool sec_con_input = true;
+    bool sec_trace_ctl = true, sec_hot_ctl = true;
+    bool sec_holes_help = true, sec_patch_help = true;
+    bool sec_vid_ctl = true;
+    // Re-tile on the first frame, and whenever the user asks for it.
+    bool relayout = true;
+
+    ScsiBlockDev scsi_dev;
+
+    auto step_cycle = [&]() {
+        if (cycle == 8) top->reset = 0;
+
+        top->clk = 1; top->eval();
+        scsi_dev.step(top);
+        if ((cycle & (SCLK_DIV - 1)) == 0) top->sclk = !top->sclk;
+
+        urx.sample(cycle, top->txdb);
+        utx.step(cycle, urx.bit_time);
+        top->rxdb = utx.line;
+        ps2.step(top, cycle);
+
+        if (top->tx_valid) console.push_back((char)top->tx_data);
+
+        vidcap.step(top->vid_ce_pix, top->vid_de, top->vid_hsync, top->vid_vsync,
+                    top->vid_r, top->vid_g, top->vid_b);
+
+        if (top->bus_ack) {
+            hot[top->bus_addr]++;
+            if (trace_on) {
+                trace.push_back({cycle, top->bus_addr,
+                                 top->bus_we ? top->bus_wdata : top->bus_rdata,
+                                 (uint8_t)top->bus_be, (bool)top->bus_we});
+                while (trace.size() > trace_cap) trace.pop_front();
+            }
+        }
+        if (top->bus_unclaimed) {
+            Hole &h = holes[top->bus_addr];
+            if (!h.count) h.first = cycle;
+            h.last = cycle; h.count++;
+            if (top->bus_we) h.w = true; else h.r = true;
+        }
+        if (top->cpu_error != err_prev) {
+            uint8_t rising = top->cpu_error & ~err_prev;
+            for (int b = 0; b < 6; b++) if (rising & (1u << b)) err_count[b]++;
+            err_prev = top->cpu_error;
+        }
+
+        const std::string &td = g_dev.testdev.out;
+        while (td_seen < td.size()) {
+            char c = td[td_seen++];
+            if (c != '\r') console.push_back(c);
+        }
+
+        top->clk = 0; top->eval();
+        cycle++;
+    };
+
+    bool done = false;
+    while (!done) {
+        SDL_Event ev;
+        while (SDL_PollEvent(&ev)) {
+            ImGui_ImplSDL2_ProcessEvent(&ev);
+            if (ev.type == SDL_QUIT) done = true;
+            if (ev.type == SDL_WINDOWEVENT && ev.window.event == SDL_WINDOWEVENT_CLOSE &&
+                ev.window.windowID == SDL_GetWindowID(window)) done = true;
+            if (ev.type == SDL_KEYDOWN && !ImGui::GetIO().WantCaptureKeyboard) {
+                if (ev.key.keysym.sym == SDLK_F5)  running = !running;
+                if (ev.key.keysym.sym == SDLK_F11) step_once = true;
+                if (ev.key.keysym.sym == SDLK_F6)  step_many = true;
+                // F12 hands the keyboard and mouse to the machine, and takes
+                // them back. Without a toggle every F5 would also land in the
+                // guest. While grabbed the pointer is captured in relative
+                // mode, so the guest sees continuous motion instead of a
+                // pointer that stops at the edge of the window - which is the
+                // difference between a mouse the machine can use and one it
+                // cannot.
+                if (ev.key.keysym.sym == SDLK_F12) {
+                    ps2_grab = !ps2_grab;
+                    SDL_SetRelativeMouseMode(ps2_grab ? SDL_TRUE : SDL_FALSE);
+                }
+            }
+            if (ps2_grab && !ImGui::GetIO().WantCaptureKeyboard &&
+                (ev.type == SDL_KEYDOWN || ev.type == SDL_KEYUP)) {
+                uint8_t code; bool ext;
+                if (sdl_to_ps2(ev.key.keysym.scancode, code, ext))
+                    ps2.push_key(code, ext, ev.type == SDL_KEYDOWN);
+            }
+            if (ps2_grab && ev.type == SDL_MOUSEMOTION)
+                ps2.push_mouse(mouse_buttons, ev.motion.xrel, -ev.motion.yrel);
+            if (ps2_grab && (ev.type == SDL_MOUSEBUTTONDOWN || ev.type == SDL_MOUSEBUTTONUP)) {
+                uint8_t bit = ev.button.button == SDL_BUTTON_LEFT   ? 0x01
+                            : ev.button.button == SDL_BUTTON_RIGHT  ? 0x02
+                            : ev.button.button == SDL_BUTTON_MIDDLE ? 0x04 : 0x00;
+                if (ev.type == SDL_MOUSEBUTTONDOWN) mouse_buttons |= bit;
+                else                                mouse_buttons &= ~bit;
+                ps2.push_mouse(mouse_buttons, 0, 0);
+            }
+        }
+
+        if (do_reset) {
+            delete top;
+            top = new Vsim_top;
+            top->reset = 1; top->sclk = 0; top->clk = 0;
+            top->boot_pc = boot_pc; top->gio_present = testdev ? 1 : 0; top->rxdb = 1;
+            top->gfx_present = gfx_present ? 1 : 0;
+            top->mem_mb  = ram_mb;
+            top->icache_en = 1; top->dcache_en = 1;
+            cycle = 0; console.clear(); trace.clear(); hot.clear(); holes.clear();
+            urx = UartRx(); utx = UartTx(); td_seen = 0; err_prev = 0;
+            for (int b = 0; b < 6; b++) err_count[b] = 0;
+            g_dev.testdev.out.clear(); g_dev.testdev.exited = false;
+            std::fill(g_dev.vram.bytes.begin(), g_dev.vram.bytes.end(), 0);
+            vidcap.clear(); vram_last_upload = 0;
+            scsi_dev.reset();
+            do_reset = false;
+        }
+        if (step_once) { step_cycle(); step_once = false; }
+        if (step_many) { for (int i = 0; i < 5000; i++) step_cycle(); step_many = false; }
+        if (running)   { for (int i = 0; i < step_batch; i++) step_cycle(); }
+
+        uint32_t now = SDL_GetTicks();
+        if (now - last_rate_ms >= 500) {
+            cycles_per_sec = (cycle - last_cycle_mark) * 1000.0 / (now - last_rate_ms);
+            last_cycle_mark = cycle;
+            last_rate_ms = now;
+        }
+
+        ImGui_ImplOpenGL2_NewFrame();
+        ImGui_ImplSDL2_NewFrame(window);
+        ImGui::NewFrame();
+
+        ImGuiIO &io = ImGui::GetIO();
+
+        //---------------- menu bar ----------------
+        float menu_h = 0.0f;
+        if (ImGui::BeginMainMenuBar()) {
+            menu_h = ImGui::GetWindowSize().y;
+            if (ImGui::BeginMenu("Run")) {
+                if (ImGui::MenuItem(running ? "Stop" : "Run", "F5")) running = !running;
+                if (ImGui::MenuItem("Single step", "F11"))          step_once = true;
+                if (ImGui::MenuItem("5000 steps", "F6"))            step_many = true;
+                ImGui::Separator();
+                if (ImGui::MenuItem("Reset machine"))               do_reset = true;
+                ImGui::Separator();
+                if (ImGui::MenuItem("Quit"))                        done = true;
+                ImGui::EndMenu();
+            }
+            if (ImGui::BeginMenu("View")) {
+                ImGui::MenuItem("Display",             nullptr, &show_display);
+                ImGui::MenuItem("Control",             nullptr, &show_control);
+                ImGui::MenuItem("Console",             nullptr, &show_console);
+                ImGui::MenuItem("Bus trace",           nullptr, &show_trace);
+                ImGui::MenuItem("Unclaimed addresses", nullptr, &show_holes);
+                ImGui::MenuItem("Hot addresses",       nullptr, &show_hot);
+                ImGui::MenuItem("PROM patches",        nullptr, &show_patches);
+                ImGui::Separator();
+                ImGui::MenuItem("RAM hex editor",      nullptr, &show_ram);
+                ImGui::MenuItem("PROM hex editor",     nullptr, &show_prom);
+                ImGui::Separator();
+                if (ImGui::MenuItem("Reset layout")) relayout = true;
+                ImGui::EndMenu();
+            }
+            // Machine state where it is always visible, whatever is open.
+            char st[160];
+            snprintf(st, sizeof(st), "cycle %llu   %.2f Mcycles/s   %s   %zu bytes printed",
+                     (unsigned long long)cycle, cycles_per_sec / 1e6,
+                     running ? "RUNNING" : "stopped", console.size());
+            float w = ImGui::CalcTextSize(st).x;
+            ImGui::SameLine(ImGui::GetWindowWidth() - w - 20.0f);
+            ImGui::TextUnformatted(st);
+            ImGui::EndMainMenuBar();
+        }
+
+        //---------------- first-use tiling ----------------
+        // Three columns under the menu bar. Applied with ImGuiCond_Always only
+        // on a relayout, so the rest of the time every window is free to be
+        // moved and resized and imgui.ini remembers where it ended up.
+        const ImGuiCond place = relayout ? ImGuiCond_Always : ImGuiCond_FirstUseEver;
+        const float W  = io.DisplaySize.x;
+        const float H  = io.DisplaySize.y - menu_h;
+        const float cw = W / 3.0f;
+        auto tile = [&](float x, float y, float w, float h) {
+            ImGui::SetNextWindowPos (ImVec2(x, menu_h + y), place);
+            ImGui::SetNextWindowSize(ImVec2(w, h),          place);
+        };
+
+        //---------------- Display ----------------
+        // Newport's output, and the frame buffer behind it. Both are here on
+        // purpose: pixels in the store but not on the pins is a video timing
+        // fault, and nothing in either is a rasteriser fault. See
+        // sim_video_cap.h.
+        if (show_display) {
+            tile(0, 0, cw * 2.0f, H * 0.6f);
+            ImGui::Begin("Display (Newport)", &show_display);
+
+            if (ImGui::CollapsingHeader("Source and scale",
+                                        sec_vid_ctl ? ImGuiTreeNodeFlags_DefaultOpen : 0)) {
+                ImGui::Checkbox("frame buffer instead of video out", &vid_show_vram);
+                ImGui::SameLine();
+                ImGui::Checkbox("show colour index", &vid_index);
+                ImGui::SameLine();
+                if (ImGui::Button("clear capture")) vidcap.clear();
+                ImGui::SetNextItemWidth(-140.0f);
+                ImGui::SliderFloat("zoom", &vid_zoom, 0.125f, 2.0f, "%.3fx");
+                ImGui::Text("frames %llu   last %dx%d   lit pixels %llu",
+                            (unsigned long long)vidcap.frames,
+                            vidcap.seen_w, vidcap.seen_h,
+                            (unsigned long long)vidcap.lit);
+                ImGui::TextDisabled(
+                    "F12 %s. While grabbed the pointer is captured and every key "
+                    "goes to the machine's keyboard controller.",
+                    ps2_grab ? "releases the keyboard and mouse"
+                             : "gives the keyboard and mouse to the machine");
+            }
+
+            int tw = 0, th = 0;
+            GLuint tex = 0;
+            if (vid_show_vram) {
+                // 4 bytes a pixel on a 2048-pixel stride, drawing planes
+                // only (vram_to_rgba has the layout). Rebuilt at most once
+                // a frame: it is 1.3 M pixels and the machine is not going to
+                // change them faster than the display can show it.
+                tw = 1280; th = 1024;
+                if (vram_rgba.size() != (size_t)tw * th)
+                    vram_rgba.assign((size_t)tw * th, 0xFF000000u);
+                if (cycle != vram_last_upload) {
+                    vram_to_rgba(g_dev.vram.bytes.data(), g_dev.vram.size(),
+                                 tw, th, sgisim::VRAM_STRIDE, vid_index,
+                                 vram_rgba.data(), tw);
+                    vram_last_upload = cycle;
+                    if (!vram_tex) glGenTextures(1, &vram_tex);
+                    glBindTexture(GL_TEXTURE_2D, vram_tex);
+                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+                    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, tw, th, 0,
+                                 GL_RGBA, GL_UNSIGNED_BYTE, vram_rgba.data());
+                }
+                tex = vram_tex;
+            } else {
+                tw = vidcap.seen_w > 0 ? vidcap.seen_w : 640;
+                th = vidcap.seen_h > 0 ? vidcap.seen_h : 480;
+                if (tw > VideoCapture::MAXW) tw = VideoCapture::MAXW;
+                if (th > VideoCapture::MAXH) th = VideoCapture::MAXH;
+                if (!vid_tex) glGenTextures(1, &vid_tex);
+                glBindTexture(GL_TEXTURE_2D, vid_tex);
+                glPixelStorei(GL_UNPACK_ROW_LENGTH, VideoCapture::MAXW);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, tw, th, 0,
+                             GL_RGBA, GL_UNSIGNED_BYTE, vidcap.fb.data());
+                glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+                tex = vid_tex;
+            }
+
+            ImGui::BeginChild("vid", ImVec2(0, 0), true,
+                              ImGuiWindowFlags_HorizontalScrollbar);
+            if (tex)
+                ImGui::Image((ImTextureID)(intptr_t)tex,
+                             ImVec2(tw * vid_zoom, th * vid_zoom));
+            // Clicking the picture is the other way to hand over the mouse,
+            // which is what anyone who has used an emulator will try first.
+            if (ImGui::IsItemClicked() && !ps2_grab) {
+                ps2_grab = true;
+                SDL_SetRelativeMouseMode(SDL_TRUE);
+            }
+            ImGui::EndChild();
+            ImGui::End();
+        }
+
+        //---------------- Control ----------------
+        if (show_control) {
+            tile(0, H * 0.60f, cw, H * 0.40f);
+            ImGui::Begin("Control", &show_control);
+            if (ImGui::CollapsingHeader("What is loaded",
+                                        sec_ctl_load ? ImGuiTreeNodeFlags_DefaultOpen : 0)) {
+                ImGui::TextWrapped("%s", load_msg.empty() ? "(nothing loaded)" : load_msg.c_str());
+                ImGui::Text("boot PC %08X   RAM %u MB   testdev %s",
+                            boot_pc, ram_mb, testdev ? "yes" : "no");
+            }
+            if (ImGui::CollapsingHeader("Run control",
+                                        sec_ctl_run ? ImGuiTreeNodeFlags_DefaultOpen : 0)) {
+                if (ImGui::Button(running ? "Stop (F5)" : "Run (F5)")) running = !running;
+                ImGui::SameLine(); if (ImGui::Button("Step (F11)")) step_once = true;
+                ImGui::SameLine(); if (ImGui::Button("5000 (F6)"))  step_many = true;
+                ImGui::SameLine(); if (ImGui::Button("Reset"))      do_reset = true;
+                ImGui::Text("cycle %llu   %.2f Mcycles/s",
+                            (unsigned long long)cycle, cycles_per_sec / 1e6);
+                ImGui::SetNextItemWidth(-140.0f);
+                ImGui::SliderInt("cycles per frame", &step_batch, 1000, 2000000);
+            }
+            // cpu_error is a set of N64 debugging aids, not faults: the test
+            // suite raises most of them on purpose. Counted, never fatal here.
+            if (ImGui::CollapsingHeader("cpu_error (informational)",
+                                        sec_ctl_err ? ImGuiTreeNodeFlags_DefaultOpen : 0)) {
+                bool any_err = false;
+                for (int b = 0; b < 6; b++)
+                    if (err_count[b]) {
+                        ImGui::Text("  %-24s %llu", kErrorNames[b],
+                                    (unsigned long long)err_count[b]);
+                        any_err = true;
+                    }
+                if (!any_err) ImGui::TextDisabled("  none");
+            }
+            ImGui::End();
+        }
+
+        //---------------- Console ----------------
+        if (show_console) {
+            tile(cw, H * 0.60f, cw, H * 0.40f);
+            ImGui::Begin("Console (SCC channel B / tty1)", &show_console);
+            ImGui::TextDisabled("%zu bytes printed   wire bit time %llu clocks",
+                                console.size(), (unsigned long long)urx.bit_time);
+            // Reserve room for the input box only while it is unfolded, so
+            // folding it actually gives the output the screen back.
+            const float input_h = sec_con_input
+                                ? ImGui::GetFrameHeightWithSpacing() * 3.0f
+                                : ImGui::GetFrameHeightWithSpacing() * 1.0f;
+            ImGui::BeginChild("con", ImVec2(0, -input_h), true,
+                              ImGuiWindowFlags_HorizontalScrollbar);
+            ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 1));
+            ImGui::TextUnformatted(console.c_str(), console.c_str() + console.size());
+            ImGui::PopStyleVar();
+            if (running) ImGui::SetScrollHereY(1.0f);
+            ImGui::EndChild();
+            bool can_type = urx.bit_time != 0;
+            sec_con_input = ImGui::CollapsingHeader("Type at the machine",
+                                ImGuiTreeNodeFlags_DefaultOpen);
+            if (sec_con_input) {
+                if (!can_type)
+                    ImGui::TextDisabled("waiting for the machine to transmit, to measure the bit rate");
+                else
+                    ImGui::TextDisabled("type and press Enter   (%zu queued)", utx.queue.size());
+                ImGui::BeginDisabled(!can_type);
+                ImGui::SetNextItemWidth(-1.0f);
+                if (ImGui::InputText("##type", type_buf, sizeof(type_buf),
+                                     ImGuiInputTextFlags_EnterReturnsTrue)) {
+                    for (char *p = type_buf; *p; p++) utx.queue.push_back((uint8_t)*p);
+                    utx.queue.push_back('\r');
+                    type_buf[0] = 0;
+                    ImGui::SetKeyboardFocusHere(-1);
+                }
+                ImGui::EndDisabled();
+            }
+            ImGui::End();
+        }
+
+        //---------------- Bus trace ----------------
+        if (show_trace) {
+            tile(2 * cw, 0, W - 2 * cw, H * 0.34f);
+            ImGui::Begin("Bus trace", &show_trace);
+            if (ImGui::CollapsingHeader("Controls",
+                                        sec_trace_ctl ? ImGuiTreeNodeFlags_DefaultOpen : 0)) {
+                ImGui::Checkbox("record", &trace_on);
+                ImGui::SameLine(); if (ImGui::Button("clear")) trace.clear();
+                ImGui::SameLine(); ImGui::TextDisabled("%zu of %zu", trace.size(), trace_cap);
+            }
+            ImGui::BeginChild("tr", ImVec2(0, 0), false, ImGuiWindowFlags_HorizontalScrollbar);
+            ImGuiListClipper clip;
+            clip.Begin((int)trace.size());
+            while (clip.Step())
+                for (int i = clip.DisplayStart; i < clip.DisplayEnd; i++) {
+                    const Txn &t = trace[i];
+                    ImGui::Text("%10llu %s %08X %-14s %016llX be %02X",
+                                (unsigned long long)t.cycle, t.we ? "WR" : "RD", t.addr,
+                                reg_name(t.addr), (unsigned long long)t.data, t.be);
+                }
+            if (running) ImGui::SetScrollHereY(1.0f);
+            ImGui::EndChild();
+            ImGui::End();
+        }
+
+        //---------------- Hot addresses ----------------
+        if (show_hot) {
+            tile(2 * cw, H * 0.67f, W - 2 * cw, H * 0.17f);
+            ImGui::Begin("Hot addresses", &show_hot);
+            if (ImGui::CollapsingHeader("Controls",
+                                        sec_hot_ctl ? ImGuiTreeNodeFlags_DefaultOpen : 0)) {
+                if (ImGui::Button("clear")) hot.clear();
+                ImGui::SameLine();
+                ImGui::TextDisabled("what the CPU is hammering - a hang looks like this");
+            }
+            std::vector<std::pair<uint32_t, uint64_t>> v(hot.begin(), hot.end());
+            std::sort(v.begin(), v.end(),
+                      [](const auto &a, const auto &b) { return a.second > b.second; });
+            ImGui::BeginChild("ht", ImVec2(0, 0));
+            for (size_t i = 0; i < v.size() && i < 60; i++)
+                ImGui::Text("%08X %-16s %llu", v[i].first, reg_name(v[i].first),
+                            (unsigned long long)v[i].second);
+            ImGui::EndChild();
+            ImGui::End();
+        }
+
+        //---------------- Unclaimed addresses ----------------
+        if (show_holes) {
+            tile(2 * cw, H * 0.34f, W - 2 * cw, H * 0.33f);
+            ImGui::Begin("Unclaimed addresses", &show_holes);
+            if (ImGui::CollapsingHeader("What this is",
+                                        sec_holes_help ? ImGuiTreeNodeFlags_DefaultOpen : 0))
+                ImGui::TextWrapped("Bus cycles no device answered - the live map of what is "
+                                   "still missing. The next thing to build is usually the "
+                                   "address at the top of a poll loop.");
+            if (ImGui::Button("clear")) holes.clear();
+            ImGui::BeginChild("ho", ImVec2(0, 0), false, ImGuiWindowFlags_HorizontalScrollbar);
+            for (const auto &e : holes)
+                ImGui::Text("%08X %-16s %-3s x%-8llu  first %llu last %llu",
+                            e.first, reg_name(e.first),
+                            e.second.r && e.second.w ? "R/W" : e.second.w ? "W" : "R",
+                            (unsigned long long)e.second.count,
+                            (unsigned long long)e.second.first,
+                            (unsigned long long)e.second.last);
+            ImGui::EndChild();
+            ImGui::End();
+        }
+
+        //---------------- PROM patches ----------------
+        if (show_patches) {
+            tile(2 * cw, H * 0.84f, W - 2 * cw, H * 0.16f);
+            ImGui::Begin("PROM patches", &show_patches);
+            if (ImGui::CollapsingHeader("What this is",
+                                        sec_patch_help ? ImGuiTreeNodeFlags_DefaultOpen : 0))
+                ImGui::TextWrapped("Word patches applied to the loaded image. 0x00000000 is "
+                                   "NOP; 0x03E00008 is `jr $ra`. Answers to \"would it get "
+                                   "further without this\" - never a fix.");
+            if (ImGui::Button("add")) patches.push_back({0x1FC00000, 0x00000000, false, ""});
+            ImGui::BeginChild("pa", ImVec2(0, 0), false, ImGuiWindowFlags_HorizontalScrollbar);
+            for (size_t i = 0; i < patches.size(); i++) {
+                ImGui::PushID((int)i);
+                ImGui::Checkbox("##en", &patches[i].enabled);
+                ImGui::SameLine(); ImGui::SetNextItemWidth(90);
+                ImGui::InputScalar("addr", ImGuiDataType_U32, &patches[i].addr,
+                                   nullptr, nullptr, "%08X",
+                                   ImGuiInputTextFlags_CharsHexadecimal);
+                ImGui::SameLine(); ImGui::SetNextItemWidth(90);
+                ImGui::InputScalar("word", ImGuiDataType_U32, &patches[i].value,
+                                   nullptr, nullptr, "%08X",
+                                   ImGuiInputTextFlags_CharsHexadecimal);
+                ImGui::SameLine(); ImGui::SetNextItemWidth(160);
+                ImGui::InputText("note", patches[i].note, sizeof(patches[i].note));
+                ImGui::SameLine();
+                if (ImGui::Button("apply") && patches[i].enabled) apply_patch(patches[i]);
+                ImGui::PopID();
+            }
+            ImGui::EndChild();
+            ImGui::TextDisabled("A patch reaches the CPU on the next fetch of that word,\n"
+                                "so reset after applying one that is already running.");
+            ImGui::End();
+        }
+
+        //---------------- hex editors ----------------
+        // DrawContents inside a window of our own rather than DrawWindow: that
+        // helper clamps the window width to its own content, which makes the
+        // window look broken - it simply refuses to widen.
+        if (show_ram) {
+            ImGui::SetNextWindowSize(ImVec2(700, 500), ImGuiCond_FirstUseEver);
+            ImGui::Begin("RAM (physical 0x08000000)", &show_ram);
+            ram_edit.DrawContents(g_dev.ram.bytes.data(), g_dev.ram.size(), 0x08000000);
+            ImGui::End();
+        }
+        if (show_prom) {
+            ImGui::SetNextWindowSize(ImVec2(700, 500), ImGuiCond_FirstUseEver);
+            ImGui::Begin("PROM (physical 0x1FC00000)", &show_prom);
+            prom_edit.DrawContents(g_dev.prom.bytes.data(), g_dev.prom.size(), 0x1FC00000);
+            ImGui::End();
+        }
+
+        relayout = false;
+
+        ImGui::Render();
+        // The drawable is not the window on a high-DPI display, and this is
+        // what glClear covers. The GL2 backend sets its own viewport from the
+        // same scale before it draws.
+        glViewport(0, 0,
+                   (int)(io.DisplaySize.x * io.DisplayFramebufferScale.x),
+                   (int)(io.DisplaySize.y * io.DisplayFramebufferScale.y));
+        glClearColor(0.08f, 0.09f, 0.11f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+        ImGui_ImplOpenGL2_RenderDrawData(ImGui::GetDrawData());
+        SDL_GL_SwapWindow(window);
+    }
+
+    top->final();
+    delete top;
+    ImGui_ImplOpenGL2_Shutdown();
+    ImGui_ImplSDL2_Shutdown();
+    ImGui::DestroyContext();
+    SDL_GL_DeleteContext(gl);
+    SDL_DestroyWindow(window);
+    SDL_Quit();
+    return 0;
+}

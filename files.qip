@@ -1,0 +1,89 @@
+# Core source manifest.
+# Add RTL here as it is written; sys/sys.qip is pulled in by the .qsf.
+#
+# Quartus compiles the CPU's VHDL directly - there is deliberately no
+# checked-in netlist. Verilator cannot read VHDL, so
+# tools/gen_r4300_verilog.sh lowers the same sources with GHDL for simulation
+# only; that output lives in rtl/cpu/generated/ and is gitignored.
+
+set_global_assignment -name SDC_FILE sgiindy.sdc
+set_global_assignment -name SYSTEMVERILOG_FILE sgiindy.sv
+
+# --- SGI chipset ---------------------------------------------------------
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sgi/sgi_indy.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sgi/sgi_mc.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sgi/mc_gio_dma.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sgi/ram_arb.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sgi/sgi_memmap.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sgi/eeprom_93c56.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sgi/sgi_hpc3.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sgi/hal2.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sgi/hpc3_scsi_dma.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sgi/sgi_ioc.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sgi/i8042.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sgi/pit8254.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sgi/sgi_ds1386.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sgi/sgi_scc.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sgi/z8530_scc.sv
+
+# --- SCSI ----------------------------------------------------------------
+# scsi.v is Verilog, not SystemVerilog, and expects scsi_vendor.vh on the
+# search path.
+set_global_assignment -name SEARCH_PATH rtl/scsi
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/scsi/sgi_scsi.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/scsi/scsi_cache.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/scsi/wd33c93.sv
+set_global_assignment -name VERILOG_FILE      rtl/scsi/scsi.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/scsi/cd_audio.sv
+
+# --- Newport graphics ------------------------------------------------------
+# sgi_indy instantiates `newport` unconditionally; `gfx_present` gates what
+# answers on the bus, not whether the board is built. The frame buffer is not
+# here - it is 16 MB and lives in DDR3.
+set_global_assignment -name SEARCH_PATH rtl/newport
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/newport/newport.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/newport/np_rex3.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/newport/np_vc2.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/newport/np_xmap9.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/newport/np_cmap.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/newport/np_bt445.sv
+
+# --- MiSTer glue -----------------------------------------------------------
+# The one part of the top level with behaviour rather than wiring, and the one
+# part with a test: verilator/tb_ddr3.cpp, `make -C verilator ddr3test`.
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/mister/ddr3_mux.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/mister/fb_linecache.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/mister/fb_fetch_arb.sv
+
+# The PLL. sys/pll_q17.qip expects rtl/pll.qip and pulls it in itself, so it
+# is deliberately NOT listed here - naming it twice is a duplicate-entity
+# error, not a no-op.
+
+# --- CPU: the MiSTer N64 project's R4300i, vendored as VHDL ---------------
+# Order matters: packages and leaf entities before the units that use them.
+#
+# The `mem` library holds the primitives cpu.vhd instantiates as `entity
+# mem.<name>`. Quartus needs the -library assignment for those; rtl/cpu/prim/
+# holds behavioural replacements for the Altera megafunctions the upstream
+# versions wrap, so the core builds without altera_mf.
+set_global_assignment -name VHDL_FILE rtl/cpu/prim/RamMLAB.vhd -library mem
+set_global_assignment -name VHDL_FILE rtl/cpu/prim/dpram.vhd   -library mem
+set_global_assignment -name VHDL_FILE rtl/cpu/r4300/SyncFifoFallThroughMLAB.vhd -library mem
+
+set_global_assignment -name VHDL_FILE rtl/cpu/prim/dpram.vhd
+set_global_assignment -name VHDL_FILE rtl/cpu/prim/RamMLAB.vhd
+set_global_assignment -name VHDL_FILE rtl/cpu/prim/cpu_mul.vhd
+set_global_assignment -name VHDL_FILE rtl/cpu/r4300/functions.vhd
+set_global_assignment -name VHDL_FILE rtl/cpu/r4300/export.vhd
+set_global_assignment -name VHDL_FILE rtl/cpu/r4300/divider.vhd
+set_global_assignment -name VHDL_FILE rtl/cpu/r4300/cpu_instrcache.vhd
+set_global_assignment -name VHDL_FILE rtl/cpu/r4300/cpu_datacache.vhd
+set_global_assignment -name VHDL_FILE rtl/cpu/r4300/cpu_TLB_instr.vhd
+set_global_assignment -name VHDL_FILE rtl/cpu/r4300/cpu_TLB_data.vhd
+set_global_assignment -name VHDL_FILE rtl/cpu/r4300/cpu_cop0.vhd
+set_global_assignment -name VHDL_FILE rtl/cpu/r4300/cpu_FPU_sqrt.vhd
+set_global_assignment -name VHDL_FILE rtl/cpu/r4300/cpu_FPU.vhd
+set_global_assignment -name VHDL_FILE rtl/cpu/r4300/cpu.vhd
+set_global_assignment -name VHDL_FILE rtl/cpu/r4300_wrap.vhd
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/cpu/r4300_bus.sv
+

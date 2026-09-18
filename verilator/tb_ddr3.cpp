@@ -1,0 +1,569 @@
+//============================================================================
+//  tb_ddr3 - a unit test for the DDR3 mux.
+//
+//  THIS IS THE ONLY THING THAT CAN BE CHECKED ABOUT THE MISTER MEMORY PATH
+//  WITHOUT A DE10-NANO. Everything else in the top level is wiring that
+//  Quartus either accepts or does not; this module has behaviour, it has five
+//  masters that can starve each other, and it is the one place where an
+//  address can be wrong by a factor of eight and produce a machine that boots
+//  and then quietly reads somebody else's memory.
+//
+//  The model of the bridge is deliberately unhelpful:
+//
+//    * BUSY is random, so a request has to be HELD until it is taken. A mux
+//      that presents RD for one cycle and walks away passes against a bridge
+//      that is never busy and loses transactions against a real one.
+//    * read latency is random within a range, and never zero, so nothing can
+//      accidentally depend on the answer arriving in a fixed number of cycles.
+//    * DOUT is driven with garbage except on the cycle DOUT_READY is high,
+//      so a mux that samples it at the wrong time fails rather than passing
+//      by luck.
+//
+//  What is checked: every read returns the last thing written to that address,
+//  every request is acknowledged exactly once, the three regions do not
+//  overlap - a write to RAM offset X must not be visible at frame buffer
+//  offset X - and the display port is not starved behind the rasteriser.
+//
+//  AND, SINCE HARDWARE FOUND WHAT ALL OF THAT MISSED: a master that HOLDS its
+//  request until it is acknowledged, rather than pulsing it. Everything above
+//  pulses - the comment at the drop site says so proudly, because pulsing is
+//  what sgi_indy.sv's CPU port does and latching it is why the mux exists.
+//  But REX3 does not pulse. `fb_req` is combinational from its state machine,
+//  so it is STILL asserted in the cycle it is acknowledged, and it goes
+//  straight from a destination read to a write with the line never dropping.
+//  The mux read that stale line as a new request and took the transaction
+//  twice, which for memory is invisible and for REX3 puts it permanently one
+//  acknowledgement behind - so it latched the shared read register while it
+//  held another master's data and drew the CPU's instruction fetches onto the
+//  screen. Phase 3 below is that shape, and it fails without the fix.
+//============================================================================
+
+#include "Vddr3_mux.h"
+#include "verilated.h"
+#include <cstdio>
+#include <cstdint>
+#include <cstring>
+#include <map>
+#include <deque>
+#include <random>
+#include <cstdlib>
+
+static Vddr3_mux *dut;
+
+// ---- the bridge model -----------------------------------------------------
+static std::map<uint32_t, uint64_t> mem;      // word address -> data
+static std::mt19937 rng(12345);
+
+struct Pending { int delay; uint64_t data; bool first; bool ram; uint64_t take; };
+static std::deque<Pending> read_pipe;
+
+// What ddr3_mux's latency counters (dbg_rdlat, build 37) must report, worked
+// out from the model: a read's latency is the clocks from the edge that took it
+// to the clock its first word is presented; "clean" reads were taken with
+// nothing owed; "ahead" is what a main-memory read was taken behind.
+static uint64_t x_lat_ram = 0, x_n_ram = 0, x_ahead = 0;
+static uint64_t x_lat_clean = 0, x_n_clean = 0;
+static std::deque<bool> x_clean_q;               // per queued read, in order
+static uint64_t clk_count = 0;
+static bool     s_fbr_valid = false;
+static uint64_t s_fbr_dout  = 0;
+
+static uint64_t garbage() { return ((uint64_t)rng() << 32) ^ rng(); }
+
+// EVERYTHING THE BRIDGE SEES IS SAMPLED AT THE CLOCK EDGE, and modelling that
+// wrongly is worse than not modelling it. The first version of this file
+// decided whether a transaction had been taken AFTER the edge, by which time
+// the mux had already seen BUSY go low and deasserted RD - so every request
+// looked dropped and the mux looked broken when it was not. A real bridge
+// latches RD/WE and the address on the edge where it is not busy, which is the
+// same edge at which the mux learns it may stop driving them.
+//
+// So: present BUSY, DOUT and DOUT_READY for the cycle, settle, capture what
+// the core is driving, clock, and only then decide.
+struct Bus { bool rd, we; uint32_t addr; uint64_t din; uint8_t be; uint8_t burst; };
+
+static void tick()
+{
+    dut->DDRAM_BUSY = (rng() % 100) < 35;
+
+    // Retire at most one read per cycle, in order, BEFORE the edge - the core
+    // has to see DOUT_READY at the edge it samples on.
+    dut->DDRAM_DOUT_READY = 0;
+    dut->DDRAM_DOUT = garbage();
+    if (!read_pipe.empty()) {
+        if (read_pipe.front().delay > 0) {
+            read_pipe.front().delay--;
+        } else {
+            const Pending &f = read_pipe.front();
+            dut->DDRAM_DOUT = f.data;
+            dut->DDRAM_DOUT_READY = 1;
+            if (f.first) {
+                uint64_t lat = clk_count - f.take;
+                if (f.ram) x_lat_ram += lat;
+                if (x_clean_q.front()) { x_lat_clean += lat; x_n_clean++; }
+                x_clean_q.pop_front();
+            }
+            read_pipe.pop_front();
+        }
+    }
+    dut->eval();
+
+    // THE BURST COUNT IS PART OF THE COMMAND AND IS SAMPLED WITH IT, before
+    // the edge. It used to be read after the edge, which worked only while the
+    // mux left DDRAM_BURSTCNT alone for a few cycles after a command was
+    // taken; the pipelined mux (docs/design/cpu-speed-tlb-icache.md) presents the next command in that
+    // same edge, and the bridge model then read the NEXT command's count.
+    Bus b{(bool)dut->DDRAM_RD, (bool)dut->DDRAM_WE, (uint32_t)dut->DDRAM_ADDR,
+          dut->DDRAM_DIN, (uint8_t)dut->DDRAM_BE, (uint8_t)dut->DDRAM_BURSTCNT};
+    bool busy = dut->DDRAM_BUSY;
+
+    // THE DISPLAY'S DATA-VALID IS COMBINATIONAL, so it has to be sampled the
+    // way a synchronous consumer does - at the edge, from the value that was
+    // there before it. Reading it afterwards loses the last word of every
+    // burst, because the state machine has already moved on by then, and the
+    // burst therefore never completes. That is a testbench mistake and not a
+    // design one, and it is the third time in this file's history that
+    // sampling on the wrong side of the edge made working RTL look broken.
+    s_fbr_valid = dut->fbr_dout_valid;
+    s_fbr_dout  = dut->fbr_dout;
+
+    dut->clk = 1; dut->eval();
+    dut->clk = 0; dut->eval();
+
+    if (!busy && (b.rd || b.we)) {
+        if (b.we) {
+            uint64_t old = mem.count(b.addr) ? mem[b.addr] : 0;
+            uint64_t val = 0;
+            for (int i = 0; i < 8; i++) {
+                // be[7-i] guards byte i, and byte 0 is the most significant.
+                int shift = 56 - 8 * i;
+                bool en = (b.be >> (7 - i)) & 1;
+                uint64_t by = en ? ((b.din >> shift) & 0xFF)
+                                 : ((old   >> shift) & 0xFF);
+                val |= by << shift;
+            }
+            mem[b.addr] = val;
+            if (getenv("DDR3_DEBUG3"))
+                printf("      [bridge] WRITE word=%08x din=%016llx be=%02x\n",
+                       b.addr, (unsigned long long)b.din, b.be);
+        } else {
+            int n = b.burst ? b.burst : 1;
+            if (getenv("DDR3_DEBUG3"))
+                printf("      [bridge] READ  word=%08x burst=%d -> %016llx\n",
+                       b.addr, n, (unsigned long long)(mem.count(b.addr) ? mem[b.addr] : 0));
+            if (getenv("DDR3_DEBUG"))
+                printf("      [bridge] read addr=%08x burst=%d\n", b.addr, n);
+            // A main-memory word address: region offset below 64 MB.
+            bool ram = ((b.addr & 0x1FFFFFFu) < 0x0800000u);
+            if (ram) { x_n_ram++; x_ahead += read_pipe.size(); }
+            x_clean_q.push_back(read_pipe.empty());
+            for (int w = 0; w < n; w++)
+                read_pipe.push_back({(w == 0 ? 2 + (int)(rng() % 6) : 0),
+                                     mem.count(b.addr + w) ? mem[b.addr + w] : 0,
+                                     w == 0, ram, clk_count});
+        }
+    }
+    clk_count++;
+}
+
+// ---- the masters ----------------------------------------------------------
+// Each keeps a shadow of what it believes it wrote, per region, so a region
+// overlap shows up as a read that returns another master's data.
+struct Master {
+    const char  *name;
+    std::map<uint32_t, uint64_t> shadow;      // byte address -> data
+    uint32_t addr = 0;
+    bool     busy = false;
+    bool     is_write = false;
+    uint64_t expect = 0;
+    uint64_t issued = 0, acked = 0;
+    uint64_t wait_cycles = 0, worst_wait = 0;
+    int      burst = 1, got = 0;      // the display's burst, and its progress
+};
+
+static Master m_fbr{"fbr"}, m_ram{"ram"}, m_prom{"prom"}, m_fbw{"fbw"};
+// Line writes (build 38): the line to read back next, and how many were
+// written and read back.
+static int64_t  ram_verify_line = -1;
+static uint64_t ram_lines = 0, ram_lines_checked = 0;
+static int failures = 0;
+
+static void fail(const char *what, uint32_t a, uint64_t want, uint64_t got)
+{
+    if (failures < 10)
+        printf("  FAILED %s at %08x: want %016llx got %016llx\n", what, a,
+               (unsigned long long)want, (unsigned long long)got);
+    failures++;
+}
+
+int main(int argc, char **argv)
+{
+    Verilated::commandArgs(argc, argv);
+    dut = new Vddr3_mux;
+
+    dut->reset = 1; dut->clk = 0;
+    dut->fbr_req = dut->dl_req = dut->ram_req = dut->prom_req = dut->fbw_req = 0;
+    dut->fbr_burst = 1;
+    dut->ram_burst = 1;
+    dut->ram_we = dut->fbw_we = 0;
+    dut->DDRAM_BUSY = 0; dut->DDRAM_DOUT_READY = 0;
+    for (int i = 0; i < 8; i++) tick();
+    dut->reset = 0;
+    tick();
+
+    // The PROM download first, because on hardware it is what happens first:
+    // 512 KB written through the dl port while the CPU is held in reset.
+    printf("downloading a PROM image ...\n");
+    std::map<uint32_t, uint64_t> prom_shadow;
+    for (uint32_t off = 0; off < 512 * 1024; off += 8) {
+        uint64_t v = ((uint64_t)off << 32) ^ 0x5A5AA5A5ull ^ off;
+        prom_shadow[off] = v;
+        dut->dl_req = 1; dut->dl_addr = off; dut->dl_wdata = v; dut->dl_be = 0xFF;
+        int spins = 0;
+        while (!dut->dl_ack && ++spins < 500) tick();
+        if (!dut->dl_ack) { printf("  FAILED download stalled at %08x\n", off); failures++; break; }
+        dut->dl_req = 0;
+        tick();
+    }
+    printf("  %zu doublewords written\n", prom_shadow.size());
+
+    // Now random traffic from the other four at once, which is the case that
+    // matters: they are only ever in each other's way here.
+    const int ROUNDS = 60000;
+    printf("running %d cycles of four-master traffic ...\n", ROUNDS);
+
+    auto region_size = [](Master *m) -> uint32_t {
+        if (m == &m_ram)  return 64u * 1024 * 1024;    // the OSD's largest
+        if (m == &m_prom) return 512u * 1024;
+        return 8u * 1024 * 1024;               // frame buffer, a slice of it
+    };
+
+    Master *all[4] = {&m_fbr, &m_ram, &m_prom, &m_fbw};
+    // The frame buffer is one store with two ports, so its two masters share
+    // one shadow - that is the point of them.
+    std::map<uint32_t, uint64_t> fb_shadow;
+
+    for (int c = 0; c < ROUNDS; c++) {
+        // Issue for any idle master, sometimes.
+        for (Master *m : all) {
+            if (m->busy) { m->wait_cycles++; continue; }
+            if ((rng() % 100) >= 25) continue;
+            uint32_t a = (rng() % (region_size(m) / 8)) * 8;
+            m->addr = a;
+            m->issued++;
+            if (m == &m_fbr) {
+                // THE DISPLAY IS A BURST MASTER. It asks for a run of words
+                // and takes them as they stream back, which is the only way a
+                // scanline arrives inside a line time - see ddr3_mux.sv.
+                m->is_write = false;
+                m->burst = 1 + (int)(rng() % 16);
+                m->got = 0;
+                dut->fbr_addr = a; dut->fbr_burst = m->burst; dut->fbr_req = 1;
+            } else if (m == &m_prom) {
+                m->is_write = false;
+                m->expect = prom_shadow.count(a) ? prom_shadow[a] : 0;
+                dut->prom_addr = a; dut->prom_req = 1;
+            } else if (m == &m_ram) {
+                // THE CPU'S PORT READS BURSTS SINCE docs/39: a line fill is
+                // one request for 2 or 4 words, answered a word at a time
+                // with ram_last on the final one. SINCE BUILD 38 A WRITE MAY
+                // BE A LINE: four words (ram_wdata, then ram_wdata3's three)
+                // in one request, acknowledged once - the data cache writing
+                // a dirty line back. A line just written is read back as a
+                // line next, so every one of them is checked.
+                int port_burst;
+                m->got = 0;
+                if (ram_verify_line >= 0) {
+                    m->is_write = false;
+                    a = (uint32_t)ram_verify_line;
+                    ram_verify_line = -1;
+                    m->burst = 4;
+                } else {
+                    m->is_write = (rng() % 2) == 0;
+                    m->burst = 1;
+                }
+                port_burst = m->burst;
+                if (m->is_write) {
+                    bool line = (rng() % 3) == 0;
+                    uint64_t v = garbage();
+                    dut->ram_wdata = v; dut->ram_be = 0xFF;
+                    if (line) {
+                        a &= ~(uint32_t)31;
+                        port_burst = 4;
+                        m->shadow[a] = v;
+                        for (int w = 1; w < 4; w++) {
+                            uint64_t vw = garbage();
+                            m->shadow[a + 8u * w] = vw;
+                            dut->ram_wdata3[2 * (w - 1)]     = (uint32_t)vw;
+                            dut->ram_wdata3[2 * (w - 1) + 1] = (uint32_t)(vw >> 32);
+                        }
+                        ram_verify_line = a;
+                        ram_lines++;
+                    } else {
+                        m->shadow[a] = v;
+                    }
+                } else if (m->burst != 4 || port_burst != 4 || a % 32) {
+                    static const int bursts[4] = {1, 2, 4, 4};
+                    m->burst = bursts[rng() % 4];
+                    port_burst = m->burst;
+                    a &= ~(uint32_t)(m->burst * 8 - 1);      // line-aligned
+                } else {
+                    ram_lines_checked++;
+                }
+                m->addr = a;
+                if (!m->is_write) m->expect = m->shadow.count(a) ? m->shadow[a] : 0;
+                dut->ram_addr = a; dut->ram_we = m->is_write; dut->ram_req = 1;
+                dut->ram_burst = port_burst;
+            } else {
+                m->is_write = (rng() % 2) == 0;
+                if (m->is_write) {
+                    uint64_t v = garbage();
+                    fb_shadow[a] = v;
+                    dut->fbw_wdata = v; dut->fbw_be = 0xFF;
+                } else {
+                    m->expect = fb_shadow.count(a) ? fb_shadow[a] : 0;
+                }
+                dut->fbw_addr = a; dut->fbw_we = m->is_write; dut->fbw_req = 1;
+            }
+            m->busy = true;
+            m->wait_cycles = 0;
+        }
+
+        tick();
+        // The burst request is HELD until the mux takes it; everything else
+        // pulses. Both shapes have to be exercised, because the mux latches
+        // one and streams the other.
+        if (dut->fbr_taken) dut->fbr_req = 0;
+        if (getenv("DDR3_DEBUG") && c < 40)
+            printf("[%3d] req f=%d r=%d p=%d w=%d | RD=%d WE=%d ADDR=%08x BUSY=%d "
+                   "RDY=%d | ack f=%d r=%d p=%d w=%d\n", c,
+                   dut->fbr_req, dut->ram_req, dut->prom_req, dut->fbw_req,
+                   dut->DDRAM_RD, dut->DDRAM_WE, dut->DDRAM_ADDR, dut->DDRAM_BUSY,
+                   dut->DDRAM_DOUT_READY,
+                   dut->fbr_taken * 2 + dut->fbr_dout_valid,
+                   dut->ram_ack, dut->prom_ack, dut->fbw_ack);
+
+        // THE REQUEST IS A PULSE. Dropping it here is the whole reason the mux
+        // has to latch: this is what sgi_indy.sv's CPU port does.
+        dut->ram_req = dut->prom_req = dut->fbw_req = 0;
+
+        if (s_fbr_valid) {
+            uint32_t a = m_fbr.addr + (uint32_t)m_fbr.got * 8;
+            uint64_t want = fb_shadow.count(a) ? fb_shadow[a] : 0;
+            if (s_fbr_dout != want) fail("fbr burst word", a, want, s_fbr_dout);
+            if (++m_fbr.got >= m_fbr.burst) {
+                m_fbr.busy = false; m_fbr.acked++;
+                if (m_fbr.wait_cycles > m_fbr.worst_wait)
+                    m_fbr.worst_wait = m_fbr.wait_cycles;
+            }
+        }
+        if (dut->ram_ack) {
+            // One ack per word, in address order, each checked against the
+            // shadow at ITS address; the count must close exactly where
+            // ram_last says it does.
+            if (!m_ram.is_write) {
+                uint32_t a = m_ram.addr + (uint32_t)m_ram.got * 8;
+                uint64_t want = m_ram.shadow.count(a) ? m_ram.shadow[a] : 0;
+                if (dut->ram_rdata != want) fail("ram read", a, want, dut->ram_rdata);
+            }
+            m_ram.got++;
+            bool done = m_ram.got >= m_ram.burst;
+            if ((bool)dut->ram_last != done) {
+                fail("ram_last", m_ram.addr, done, dut->ram_last);
+                done = true;
+            }
+            if (done) {
+                m_ram.busy = false; m_ram.acked++;
+                if (m_ram.wait_cycles > m_ram.worst_wait) m_ram.worst_wait = m_ram.wait_cycles;
+            }
+        }
+        if (dut->prom_ack) {
+            if (dut->prom_rdata != m_prom.expect)
+                fail("prom read", m_prom.addr, m_prom.expect, dut->prom_rdata);
+            m_prom.busy = false; m_prom.acked++;
+            if (m_prom.wait_cycles > m_prom.worst_wait) m_prom.worst_wait = m_prom.wait_cycles;
+        }
+        if (dut->fbw_ack) {
+            if (!m_fbw.is_write && dut->fbw_rdata != m_fbw.expect)
+                fail("fbw read", m_fbw.addr, m_fbw.expect, dut->fbw_rdata);
+            m_fbw.busy = false; m_fbw.acked++;
+            if (m_fbw.wait_cycles > m_fbw.worst_wait) m_fbw.worst_wait = m_fbw.wait_cycles;
+        }
+    }
+
+    // ---- phase 3: a HOLDING master that alternates read and write ---------
+    // This is REX3's shape and nothing above it exercises it. Every pixel of a
+    // logic-op draw is: read the destination, then write the merged value back
+    // to the same address - and `fb_req` never drops between the two, nor in
+    // the cycle each one is acknowledged. Main memory is kept busy underneath
+    // so that the shared read register holds somebody else's data whenever the
+    // mux gets an acknowledgement wrong; without that this passes even broken,
+    // because the stale value would be REX3's own.
+    // DRAIN PHASE 2 FIRST. It leaves a transaction in flight, and one stray
+    // acknowledgement at the start of this phase puts the whole of it
+    // permanently one ack out of step - which reads exactly like the bug it is
+    // meant to catch. It cost an hour of blaming the fix for the harness.
+    dut->fbw_req = 0; dut->ram_req = 0; dut->prom_req = 0; dut->fbr_req = 0;
+    dut->ram_burst = 1;
+    for (int i = 0; i < 512; i++) tick();
+
+    printf("\nphase 3: a read-modify-write master that holds its request ...\n");
+    const int RMW_PIXELS = getenv("DDR3_DEBUG3") ? 4 : 4000;
+    uint64_t rmw_bad = 0, rmw_done = 0;
+    uint32_t ram_probe = 0;
+    auto keep_ram_busy = [&]() {
+        if (!dut->ram_req) {
+            ram_probe = (ram_probe + 8) % (1u << 20);
+            dut->ram_addr = ram_probe; dut->ram_we = 0; dut->ram_req = 1;
+        }
+        tick();
+        if (dut->ram_ack) dut->ram_req = 0;
+    };
+    for (int px = 0; px < RMW_PIXELS; px++) {
+        uint32_t a = (uint32_t)(px % 2048) * 8;
+        uint64_t want = fb_shadow.count(a) ? fb_shadow[a] : 0;
+        if (getenv("DDR3_DEBUG3")) printf("  -- pixel %d addr=%08x want=%016llx\n",
+                                          px, a, (unsigned long long)want);
+
+        // -- the destination read. Hold fbw_req until fbw_ack, as REX3 does.
+        dut->fbw_addr = a; dut->fbw_we = 0; dut->fbw_req = 1;
+        int spins = 0;
+        while (!dut->fbw_ack && ++spins < 4000) keep_ram_busy();
+        if (!dut->fbw_ack) { fail("rmw read never acked", a, want, 0); break; }
+        uint64_t got = dut->fbw_rdata;
+        if (getenv("DDR3_DEBUG3"))
+            printf("     read acked after %d ticks (clk=%llu) got=%016llx\n",
+                   spins, (unsigned long long)clk_count, (unsigned long long)got);
+
+        // THE ONE CYCLE THAT MATTERS. REX3 is a state machine: it cannot react
+        // to an acknowledgement within the cycle that carries it, so the mux
+        // samples the SAME request one more time with `pend` already cleared.
+        // Reacting instantly here is what made an earlier version of this
+        // phase pass against the broken mux - the testbench was quicker than
+        // any hardware can be, and so never presented the stale line at all.
+        keep_ram_busy();
+
+        // -- straight into the write, WITHOUT dropping the request, and with a
+        // value that depends on what was read - exactly as fb_word_new does.
+        uint64_t merged = (got & 0xFFFFFFFFFF000000ull) | (uint64_t)(px & 0xFFFFFF);
+        dut->fbw_we = 1; dut->fbw_wdata = merged; dut->fbw_be = 0xFF; dut->fbw_req = 1;
+        spins = 0;
+        while (!dut->fbw_ack && ++spins < 4000) keep_ram_busy();
+        if (!dut->fbw_ack) { fail("rmw write never acked", a, merged, 0); break; }
+        if (getenv("DDR3_DEBUG3"))
+            printf("     write acked after %d ticks (clk=%llu) din=%016llx\n",
+                   spins, (unsigned long long)clk_count, (unsigned long long)merged);
+        keep_ram_busy();                  // the same one-cycle reaction delay
+
+        // Only now is the pixel finished, so only now does the shadow move.
+        // Checking the read AFTER the write has landed is deliberate: a mux
+        // that is one acknowledgement behind writes the right value to the
+        // wrong pixel as readily as the wrong value to the right one.
+        if (got != want && rmw_bad++ < 4) fail("rmw destination read", a, want, got);
+        fb_shadow[a] = merged;
+
+        dut->fbw_req = 0; dut->fbw_we = 0;
+        tick();
+        rmw_done++;
+    }
+    printf("  %llu read-modify-write pixels, %llu with a wrong destination\n",
+           (unsigned long long)rmw_done, (unsigned long long)rmw_bad);
+
+    // ---- phase 4: two identical reads back to back, line never dropping ---
+    // REX3's screen-to-screen copy reads the source and then the destination,
+    // and when they are the same pixel that is the SAME address twice with
+    // `fb_req` high throughout. A latch rule that says "a held request that
+    // has not changed is never new" refuses the second one and the rasteriser
+    // waits for ever, which is a hang rather than a wrong picture.
+    printf("\nphase 4: two identical reads with the request line held ...\n");
+    uint64_t pairs = 0;
+    for (int n = 0; n < 200; n++) {
+        uint32_t a = (uint32_t)(n % 512) * 8;
+        uint64_t want = fb_shadow.count(a) ? fb_shadow[a] : 0;
+        bool ok = true;
+        for (int half = 0; half < 2 && ok; half++) {
+            dut->fbw_addr = a; dut->fbw_we = 0; dut->fbw_req = 1;
+            int spins = 0;
+            while (!dut->fbw_ack && ++spins < 4000) keep_ram_busy();
+            if (!dut->fbw_ack) { fail("identical back-to-back read hung", a, want, 0);
+                                 ok = false; break; }
+            if (dut->fbw_rdata != want) fail("identical read", a, want, dut->fbw_rdata);
+            keep_ram_busy();          // the one-cycle reaction delay, line still up
+        }
+        if (!ok) break;
+        dut->fbw_req = 0; tick();
+        pairs++;
+    }
+    printf("  %llu identical read pairs completed\n", (unsigned long long)pairs);
+
+    printf("\n%-6s %10s %10s %12s\n", "master", "issued", "acked", "worst wait");
+    for (Master *m : all)
+        printf("%-6s %10llu %10llu %12llu\n", m->name,
+               (unsigned long long)m->issued, (unsigned long long)m->acked,
+               (unsigned long long)m->worst_wait);
+
+    const int data_failures = failures;   // before any check adds to it
+
+    // The latency counters, against the model's own bookkeeping. /64 fields
+    // report bits 37:6 of a 38-bit count, so the expectation is shifted the
+    // same way.
+    uint64_t w0 = dut->dbg_rdlat[0], w1 = dut->dbg_rdlat[1], w2 = dut->dbg_rdlat[2];
+    printf("\nread latency counters: RAM reads %llu (model %llu), %.2f clocks take to first word, "
+           "%.2f words ahead; reads taken clean %llu (model %llu), %.2f clocks; RAM burst gaps x64 %llu\n",
+           (unsigned long long)(w0 & 0xFFFFFFFF), (unsigned long long)x_n_ram,
+           x_n_ram ? (double)x_lat_ram / x_n_ram : 0.0, x_n_ram ? (double)x_ahead / x_n_ram : 0.0,
+           (unsigned long long)(w2 & 0xFFFFFFFF), (unsigned long long)x_n_clean,
+           x_n_clean ? (double)x_lat_clean / x_n_clean : 0.0,
+           (unsigned long long)(w1 & 0xFFFFFFFF));
+    bool counters_ok = (w0 & 0xFFFFFFFF) == (x_n_ram & 0xFFFFFFFF)
+                    && (w0 >> 32) == ((x_lat_ram >> 6) & 0xFFFFFFFF)
+                    && (w1 >> 32) == ((x_ahead >> 6) & 0xFFFFFFFF)
+                    && (w1 & 0xFFFFFFFF) == 0
+                    && (w2 & 0xFFFFFFFF) == (x_n_clean & 0xFFFFFFFF)
+                    && (w2 >> 32) == ((x_lat_clean >> 6) & 0xFFFFFFFF);
+    auto check = [&](const char *what, bool ok) {
+        printf("  %s %s\n", ok ? "ok     " : "FAILED ", what);
+        if (!ok) failures++;
+    };
+    printf("\n");
+    check("every read returned what was last written to it", failures == 0);
+    // At most one outstanding per master, so acked is issued or one behind.
+    bool balanced = true;
+    for (Master *m : all)
+        if (m->issued - m->acked > 1) balanced = false;
+    check("every request was acknowledged exactly once", balanced);
+    check("all four masters made progress",
+          m_fbr.acked > 100 && m_ram.acked > 100 &&
+          m_prom.acked > 100 && m_fbw.acked > 100);
+    // The display must never be starved. Until docs/design/cpu-speed-tlb-icache.md the display was first
+    // in the priority list and one transaction ran at a time, and this checked
+    // that it never waited longer than the rasteriser. The mux is pipelined
+    // now and main memory goes first - the CPU stalls on every transaction and
+    // never has more than one - so a display burst can wait behind a memory
+    // read or two and its own words; what must hold is that the wait stays
+    // BOUNDED, far inside the three line times (~5000 clocks) of slack
+    // fb_linecache keeps. A starved display waits thousands of clocks here.
+    check("the display port is not starved (worst wait under 400 clocks)",
+          m_fbr.worst_wait < 400);
+    // A region overlap shows up as one master reading another's data, which
+    // the shadows above already catch - but only if the regions were actually
+    // exercised far enough apart to alias. 64 MB of RAM against a 16 MB frame
+    // buffer at a 64 MB offset aliases at once if the base is dropped. (Counts
+    // data failures only: a failed check above does not make this one fail.)
+    check("main memory and the frame buffer did not alias",
+          m_ram.acked > 100 && data_failures == 0);
+    // THE ONE HARDWARE FOUND. A held request must not be taken twice.
+    check("a held read-modify-write master read back its own writes",
+          rmw_done == (uint64_t)RMW_PIXELS && rmw_bad == 0);
+    check("two identical held reads back to back both completed",
+          pairs == 200);
+    check("the read latency counters agree with the model", counters_ok);
+    printf("  (%llu RAM line writes, %llu read back as lines)\n",
+           (unsigned long long)ram_lines, (unsigned long long)ram_lines_checked);
+    check("RAM line writes happened and were read back as lines",
+          ram_lines > 100 && ram_lines_checked + 2 >= ram_lines);
+
+    printf(failures ? "\nDDR3MUX: FAIL\n" : "\nDDR3MUX: PASS\n");
+    delete dut;
+    return failures ? 1 : 0;
+}

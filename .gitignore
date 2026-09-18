@@ -73,8 +73,16 @@ verilator/obj_dir_lcache/
 verilator/obj_dir_rex3/
 
 # Machine-specific deploy configuration: host, ssh key, Quartus path.
-# scripts/local.env.sample is the committed template.
-scripts/local.env
+# scripts/local.env.sample is the committed template. Every other copy of
+# local.env (local.env.bak-*, local.env.old, ...) holds the same private
+# details, so all of them are ignored.
+scripts/local.env*
+!scripts/local.env.sample
+
+# Backup copies are never part of the core.
+*.bak
+*.bak-*
+*.orig
 
 # The full-flow Quartus logs written by scripts/build.sh (*.log is already
 # ignored above; stderr is not).
