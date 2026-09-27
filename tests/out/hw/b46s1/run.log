@@ -1,0 +1,6 @@
+[16:54:47] staging output_files/sgiindy-b46-seed1-m900.rbf md5 014369572d90dd704958fe48c18c9d58; steps: perfon perfoff
+[16:54:49] perfprobe, prefetch on
+[17:10:44] perf-ipf rc=0 | user	0m0.020s|sys	0m0.056s|[17:10:44] done -> tests/out/hw/perf-b46s1-ipf|
+[17:10:44] perfprobe, prefetch off
+[17:26:58] perf-noipf rc=0 | user	0m0.021s|sys	0m0.060s|[17:26:58] done -> tests/out/hw/perf-b46s1-noipf|
+[17:26:59] BOARDRUN DONE
