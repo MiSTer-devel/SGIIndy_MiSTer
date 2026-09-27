@@ -1,0 +1,16 @@
+status = 0x00000000000000000000000000000000
+[17:31:01] options: defaults; image /media/fat/games/SGIIndy/SGIIndy53.img; CD /media/fat/games/SGIIndy/IRIX 5.3 XFS.iso; file /dist/dmedia_tools.data
+[17:31:01] restoring /media/fat/games/SGIIndy/SGIIndy53.img from /media/fat/games/SGIIndy/SGIIndy53-pristine.img
+[17:35:37] launching 91102e6b8bf76a68270e02f7d5a555cd
+[17:36:05] UNKNOWN    panicstr=0x00000000 panel9  0.0% idx16  0.0% indices 168 marker  0.2% 
+[17:36:27] BOOTING    panicstr=0x00000000 panel9 12.3% idx16  0.0% indices 168 marker  0.1% 
+[17:36:48] BOOTING    panicstr=0x00000000 panel9 12.3% idx16  0.0% indices 168 marker  0.1% 
+[17:37:09] X-UP       panicstr=0x00000000 panel9  0.0% idx16 22.2% indices  19 marker  0.0% 
+[17:37:24] parking the pointer, logging in as root
+[17:39:37] copying /dist/dmedia_tools.data off the CD
+[17:42:07] after: scsi: hps xact rd=15388 wr=4746 busy=36.4s | target wait=30.7s | bus busy=33.0s data=29.7s 65.77MB (2.22 MB/s) | cache hits=95810 misses=3132 writes=32642
+[17:42:08] din: waited 11 clocks for the target's buffers, 0 captures while not ready, 0 forced
+[17:42:08] halting
+copy 11758622 bytes, disc 11758622 bytes
+CDFILE PASS: 0 bytes differ
+[17:43:13] done -> tests/out/hw/cdfile-b46s3-.log

@@ -372,3 +372,35 @@ every word handed to the CPU must be what memory held (60,000 random
 transactions, 19,584 buffer hits, 0 wrong). With the snoop removed it fails at
 once. `ramarbtest` (the arbiter's protocol at latencies 1/12/60) passes
 unchanged.
+
+### Build 46 on the board
+
+`scripts/perfprobe.sh` on the pristine image, one bitstream, the buffer on and
+then off (`ipf=off`), 2026-09-27 (tests/out/hw/perf-b46s1-*):
+
+| workload | buffer on | buffer off | |
+|---|---:|---:|---:|
+| launch to the X login screen | 79 s | 90 s | 1.14x |
+| 60 x `/bin/ls /` | 3.52 s | 4.02 s | 1.14x |
+| perl loop | 12.14 s | 14.49 s | **1.19x** |
+| `ls -lR /usr/lib/X11` into the Console | 5.27 s | 6.21 s | 1.18x |
+| dd 10 MB off the raw disk | 2.62 s | 2.85 s | 1.09x |
+| `xterm -e /bin/true`, cold / warm | 0.65 / 0.37 s | 0.69 / 0.40 s | 1.06 / 1.08x |
+| `xdpyinfo` | 0.129 s | 0.140 s | 1.09x |
+| bzip2 -9 of /unix | 81.47 s | 81.57 s | 1.00x |
+
+Over the whole session the buffer answered **47 % of all instruction fills**
+(48.8M of 103.7M) - the replay said 46 %. The gain is larger than the replay's
+arithmetic suggested because a hit costs five clocks against a fill's twenty
+and the saved fills are exactly the ones the pipeline was stalled on; bzip2 is
+bound on data misses and does not move.
+
+**The data side is next.** `--dtrace` over the same boot: 87.4 % of data-cache
+misses are to the line after the previous one (bzero, bcopy), and the same
+three-line burst would leave 40.9 % of the data fills (four lines: 33.6 %).
+The buffer's coherence argument holds for a write-back data cache too - a
+dirty line is in the cache, not asked for, until its writeback, which the
+snoop sees. What differs is the cost of a useless prefetch: random-access
+code (bzip2) would pay eight port clocks per miss for nothing, so a data
+prefetch wants to follow a stream (the miss is at the previous miss + 1)
+rather than fire on every miss.
