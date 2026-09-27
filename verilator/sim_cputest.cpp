@@ -210,7 +210,6 @@ struct Options {
     bool        audio = false;
     bool        ipf = true;       // ram_arb's instruction prefetch buffer
     bool        dpf = true;       // ...and its data buffer
-    bool        cmdlog = false;   // print the SCSI command log's entries
     std::string wav;
     uint32_t    wav_rate = 44100;
     // Which cpu_error bits abort the run. See kErrorNames: only the two that
@@ -340,7 +339,6 @@ static void usage()
         "                    request is one HPS transaction, as before build 26\n"
         "  --no-ipf          ram_arb's instruction prefetch buffer off (build 46)\n"
         "  --no-dpf          ...and its data buffer (build 47)\n"
-        "  --cmdlog          print every SCSI command log entry (build 47)\n"
         "  --audio           fit the audio (HAL2 reports itself present); the\n"
         "                    PROM then plays its startup tune\n"
         "  --wav FILE        implies --audio: write the DAC's output as a 16-bit\n"
@@ -445,7 +443,6 @@ int main(int argc, char **argv)
         else if (a == "--audio")      opt.audio = true;
         else if (a == "--no-ipf")     opt.ipf = false;
         else if (a == "--no-dpf")     opt.dpf = false;
-        else if (a == "--cmdlog")     opt.cmdlog = true;
         else if (a == "--wav")        { opt.audio = true; opt.wav = next("--wav"); }
         else if (a == "--wav-rate")   opt.wav_rate = strtoul(next("--wav-rate"), nullptr, 0);
         else if (a == "--scsi-nocache") opt.scsi_cache = false;
@@ -926,13 +923,6 @@ int main(int argc, char **argv)
             exc_cycle   = cycle;
             exc_code    = top->dbg_exc_code;
             exc_bad     = top->dbg_exc_bad;
-        }
-
-        if (opt.cmdlog && top->cmdlog_stb) {
-            const uint64_t e = top->cmdlog;
-            printf("cmdlog: op %02x target %u len %u lba %u (cycle %llu)\n",
-                   (unsigned)(e >> 56), (unsigned)((e >> 48) & 7), (unsigned)((e >> 32) & 0xFFFF),
-                   (unsigned)(e & 0xFFFFFFFFu), (unsigned long long)cycle);
         }
 
         if (itrace_f && ((top->ifetch >> 32) & 1)) {

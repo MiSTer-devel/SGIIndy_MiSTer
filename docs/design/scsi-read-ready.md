@@ -119,32 +119,38 @@ failures before, 0 after. In IRIX's own flow many WD33C93 accesses sit between
 a stop and the next go, so these windows are narrow; this is a hazard
 removed, not yet a proven cause of the stray write.
 
-## The stray write, and the command log (build 47)
+## The "stray write" was the checker (2026-09-27)
 
-Build 46's first diskcheck (2026-09-27) caught the stray write again, on the
-same file as build 41's: `/usr/lib/libX11.so.1`. IRIX's `sum` of it (41170 /
-63140) is the true file's (md5 `9c609b2d...`, from a local copy of the same
-IRIX image), and the image's copy after the session was not (md5
-`6accfa41...`): X loads libX11 at startup, IRIX's checksum came from its page
-cache, and the file's blocks on the disk changed after that. `diskstress`
-right after it (16 synced `/unix` copies, the whole image block-diffed
-against pristine) was clean, as was a second diskcheck.
+`diskcheck` failed twice on build 46 the way it had once on build 41: a file
+IRIX had checksummed correctly (`sum` in the session agreed with the true
+file) read back different off the image afterwards - libX11.so.1, then
+libXm.so.1. The second time the used image was kept (`diskcheck.sh` now keeps
+it, with `efsdiff`, on any failure), and none of libXm's data blocks had
+changed. Its **indirect extent block** had: past the 34 real extents (272
+bytes) the rest of the 512-byte block held the tail of a directory block, the
+`/dev/hdsp` entries (`hdsp0master`, `hdsp0r17` ... `..`, `.`).
 
-Two instruments came out of it:
+IRIX does that itself. `efs_writeindir` (efs.a, efs_inode.o) takes the block
+with `getblk`, `bcopy`s `numextents * 8` bytes of its in-core extents into it
+and writes it - without clearing the rest, so the tail is whatever the buffer
+held last. A real Indy writes the same bytes, and IRIX never reads past
+`numextents`. `tools/misterdeploy/efsread.py` did: it took every nonzero
+entry in the block as an extent, followed 27 of them into other blocks, and
+handed `sumcheck` a different file. With `efsread` reading only
+`numextents` entries the kept image's files are the pristine ones and
+`diskcheck`'s own checker on it passes. All four files it sums have indirect
+extents (18-36), which is why the "failure" was rare, moved between files,
+and always had IRIX's own checksum right. `efsdiff.py` already knew this
+("extent block tail rewritten"); `efsread.py` never did.
+
+Two instruments came out of the hunt and one stays:
 
 * `verilator/tb_scsi_cache_big.sv` - the block cache over a whole disk with
-  every sector carrying its LBA and write generation, so the device side
-  checks each sector written to it lands at its own LBA. 3 x 150,000 random
-  operations across 2 GB with the bypass toggled: no stray, torn or stale
-  sector. The write-behind cache is not the stray writer in anything this
-  drives.
-* **The SCSI command log** (build 47): every command a target takes -
-  opcode, target, transfer length, LBA - goes into a 16,384-entry ring at ARM
-  `0x35810000`, written through the beacon's port and kept until the core is
-  reloaded (beacon word 49 has the ring position and the count).
-  `tools/misterdeploy/scsilog.py --file IMG PATH` lists every command that
-  touched a file's blocks and says whether any was a WRITE. That splits the
-  causes: a logged WRITE to libX11's blocks means IRIX asked for it (the
-  filesystem, or guest memory it trusted); none means the data changed below
-  the SCSI command. `diskcheck.sh` now keeps the used image and its `efsdiff`
-  on a failure, and runs the log query for each changed file.
+  every sector carrying its LBA and write generation, so the device checks
+  each flushed sector lands at its own LBA. 3 x 150,000 random operations
+  across 2 GB with the bypass toggled: no stray, torn or stale sector.
+* A SCSI command log (every command's opcode, target, length and LBA into a
+  DDR3 ring, `tools/misterdeploy/scsilog.py`) was built and sim-gated for
+  build 47 (commit 1f53475) to tell "IRIX sent a WRITE there" from "the write
+  came from below". With the cause found it was taken out again - the device
+  is 89 % full - and is there to cherry-pick if a disk question ever needs it.

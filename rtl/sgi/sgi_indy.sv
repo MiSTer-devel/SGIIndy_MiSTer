@@ -275,9 +275,6 @@ module sgi_indy #(
     output logic [63:0] dbg_scsi_bcn [7],
     // SGI: the disk-time counters (docs/design/scsi-block-cache.md), five words from sgi_scsi.
     output logic [63:0] dbg_scsi_stat [8],
-    // The SCSI command log (build 47): a strobe per command and its entry.
-    output logic        dbg_cmdlog_stb,
-    output logic [63:0] dbg_cmdlog,
     // The HPC3 SCSI0 DMA channel's live state (docs/29), a separate beacon
     // word - the engine lives in sgi_hpc3, not sgi_scsi.
     output logic [63:0] dbg_hpc3_dma,
@@ -935,9 +932,7 @@ module sgi_indy #(
         .din_lookahead_en (scsi_din_lookahead),
         .din_strict   (scsi_din_strict),
         .dbg_bcn      (dbg_scsi_bcn),
-        .dbg_stat     (dbg_scsi_stat),
-        .dbg_cmdlog_stb(dbg_cmdlog_stb),
-        .dbg_cmdlog   (dbg_cmdlog)
+        .dbg_stat     (dbg_scsi_stat)
     );
 
     // The rest of the IOC window: panel, SYS_ID, reset/LED, and the INT2

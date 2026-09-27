@@ -120,9 +120,6 @@ module sim_top
     output wire [63:0] perf0, perf1, perf2, perf3, perf4, perf5, perf6, perf7, perf8,
     output wire [63:0] perf11,   // {prefetch-buffer hits, prefetching fills}
     output wire [63:0] perf12,   // the same for the data buffer
-    // The SCSI command log's feed (build 47): printed with --cmdlog.
-    output wire        cmdlog_stb,
-    output wire [63:0] cmdlog,
     // The instruction cache's access stream, for --itrace.
     output wire [32:0] ifetch,
     // The data cache's, for --dtrace.
@@ -335,8 +332,6 @@ module sim_top
         .dbg_int_bcn   (),
         .dbg_vdma_bcn  (),
         .dbg_perf_bcn  (perf_bcn),
-        .dbg_cmdlog_stb(cmdlog_stb),
-        .dbg_cmdlog    (cmdlog),
         .dbg_ifetch    (ifetch),
         .dbg_dfetch    (dfetch),
         .irq_lines_o   (irq_lines),

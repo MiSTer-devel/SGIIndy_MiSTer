@@ -87,11 +87,6 @@ module scsi
 	output [63:0] dbg_bcn_a,    // SGI DDR3 beacon (docs/28): live word A
 	output [63:0] dbg_bcn_b,    // SGI DDR3 beacon: live word B (lba/data_len/ring)
 	output [63:0] dbg_bcn_stk,  // SGI DDR3 beacon: sticky first-stall snapshot
-	// SGI (build 47): every command this target takes, once, for the DDR3
-	// command log (sgiindy.sv): strobe, and {opcode, 5'b0, ID, transfer
-	// length, LBA} as the CDB carries them (before the CD's 2048->512 scaling).
-	output        dbg_cmdlog_stb,
-	output [63:0] dbg_cmdlog,
 	output [31:0] dbg_cda0,     // JTAG CDA0: cd_audio TOC/engine state (see cd_audio.sv)
 	output [31:0] dbg_cda2,     // JTAG CDA2: last 0xC1 CDB {op9, start5, alloc7, alloc8}
 output [31:0] dbg_cda3,     // JTAG CDA3: last play-class CDB {op, cdb3, cdb4, cdb5}
@@ -3149,10 +3144,6 @@ always @(posedge clk) begin
 		dbg_unsup_op <= op_code;
 end
 assign dbg_cmd = dbg_unsup_op;
-assign dbg_cmdlog_stb = (phase == PHASE_CMD_IN) && cmd_cpl && !cmd_cpl_d2;
-assign dbg_cmdlog     = { op_code, 5'd0, ID,
-                          cmd6_cpl ? {7'd0, tlen6} : tlen10,
-                          cmd6_cpl ? {11'd0, lba6} : lba10 };
 
 // JTAG debug: capture byte0 and byte1 of the FIRST word write exactly as the
 // target latches them (din at buffer0[0] / buffer1[0]), plus the ncr5380's
