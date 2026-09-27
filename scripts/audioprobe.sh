@@ -1,28 +1,39 @@
 #!/usr/bin/env bash
 #
-# audioprobe.sh [--tag T] [--fresh PRISTINE.img] [--sound PATH] - the audio
-# path under IRIX on the board (docs/design/audio.md).
+# audioprobe.sh [--tag T] [--fresh PRISTINE.img] [--autoconfig] [--save-as IMG]
+#               [--sound PATH] - the audio path under IRIX on the board
+#               (docs/design/audio.md).
 #
 # Boots IRIX with the audio fitted and reads HAL2's beacon words (bcnread.py
 # --audio) at each step, which is the evidence nobody has to listen for:
 #   1. at the login screen: kdsp_a2 is loaded and its rings are running -
-#      PBUS channels 0, 1 and 3 active, codec A frames counting at 48 kHz;
-#   2. logged in as root, `playaiff SOUND` typed into the Console: the DAC's
-#      peak rises above the silence it had before;
-#   3. `init 0`: the machine halts back to the PROM. Before HAL2 had a sample
-#      path this is where the desktop froze (the kdsp_a2 bzero spin), so a
-#      halt that completes is the old bug's regression check.
+#      words moving through PBUS channels 0, 1 and 3 at 48 kHz;
+#   2. logged in as root, `playaiff SOUND` typed into the Console: nonzero
+#      samples on the DAC (`last`; `peak` is held since power-on and the
+#      PROM's tune has already hit full scale);
+#   3. `init 0`: X leaves the screen. Before HAL2 had a sample path the
+#      desktop froze here (the kdsp_a2 bzero spin), with X still up.
+#
+# --autoconfig: THE RELEASE IMAGES' KERNEL HAS NO kdsp_a2. lboot evaluates
+# audio.sm's exprobe (HAL2's REV bit 15) when it links the kernel, and every
+# kernel on them was linked on a core whose HAL2 read as absent - so build 45's
+# first run found nothing in IRIX touching the audio at all. This logs in,
+# runs `/etc/autoconfig -f`, `init 6`s onto the relinked kernel and runs steps
+# 1-3 there. --save-as keeps that image (e.g. SGIIndy53-audio.img) so later
+# runs can start from it with --fresh.
+#
 # The console's text is not visible from here (it is the frame buffer), so
 # the beacon is the whole measurement, sampled every few seconds.
 #
-#   bash scripts/audioprobe.sh --tag b45 --fresh /media/fat/games/SGIIndy/SGIIndy53-pristine.img
+#   bash scripts/audioprobe.sh --tag b45 --fresh /media/fat/games/SGIIndy/SGIIndy53-pristine.img --autoconfig --save-as /media/fat/games/SGIIndy/SGIIndy53-audio.img
+#   bash scripts/audioprobe.sh --tag b46 --fresh /media/fat/games/SGIIndy/SGIIndy53-audio.img
 set -u
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" || exit 1
 if [ -r scripts/local.env ]; then . scripts/local.env; fi
 : "${MISTER_HOST:?}"; : "${MISTER_SSH_KEY:?}"; : "${MISTER_SSH_USER:=root}"
 : "${MISTER_CORE_FOLDER:=_Unstable}"; : "${RBF_REMOTE:=SGIIndy.rbf}"
 : "${MISTER_HTTP_PORT:=8182}"
-TAG="audio"; FRESH=""; SOUND="/usr/share/data/sounds/prosonus/sfx/alarm_clock.aiff"
+TAG="audio"; FRESH=""; AUTOCONF=0; SAVEAS=""; SOUND="/usr/share/data/sounds/prosonus/sfx/alarm_clock.aiff"
 IMG="/media/fat/games/${MISTER_GAMES_DIR:-SGIIndy}/SGIIndy53.img"
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -30,6 +41,8 @@ while [ $# -gt 0 ]; do
         --fresh) FRESH="$2"; shift ;;
         --sound) SOUND="$2"; shift ;;
         --img)   IMG="$2"; shift ;;
+        --autoconfig) AUTOCONF=1 ;;
+        --save-as) SAVEAS="$2"; shift ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
     shift
@@ -43,7 +56,6 @@ say() { echo "[$(date +%H:%M:%S)] $*"; }
 mkdir -p tests/out/hw
 LOG="tests/out/hw/audioprobe-$TAG.log"
 aud() { rsh "python3 $DBG/bcnread.py --audio" 2>&1 | grep '^[0-9:]* audio:' | tail -1; }
-peak() { echo "$1" | sed -n 's/.*peak=\([0-9]*\).*/\1/p'; }
 
 rsh "mkdir -p $DBG"
 for f in tools/misterdeploy/ddr3_peek.py tools/misterdeploy/fb_poke.py \
@@ -64,46 +76,107 @@ python tools/misterdeploy/launch_unstable_core.py \
 T0=$(date +%s)
 rsh "sleep 25"
 say "PROM: $(aud)" | tee -a "$LOG"
-while :; do
-    LINE=$(rsh "sleep 20; python3 $DBG/irixstate.py" 2>&1 | tail -1)
-    K=$(echo "$LINE" | awk '{print $1}')
-    say "$LINE"
-    [ "$K" = X-UP ] && break
-    [ "$K" = PANIC ] && { say "panicked, giving up" | tee -a "$LOG"; exit 1; }
-    [ $(( $(date +%s) - T0 )) -ge 480 ] && { say "no login screen in 480 s" | tee -a "$LOG"; exit 1; }
-done
-A1=$(aud); rsh "sleep 10"; A2=$(aud)
-say "login screen: $A1" | tee -a "$LOG"
-say "10 s later:   $A2" | tee -a "$LOG"
+words() { echo "$1" | sed -n 's/.* words=\([0-9]*\).*/\1/p'; }
+running() { echo "$1" | sed -n 's/.*running=\(0x[0-9a-f]*\).*/\1/p'; }
+lastsamp() { echo "$1" | sed -n 's/.* last=\(-\{0,1\}[0-9]*\).*/\1/p'; }
+PS_ARG=""       # irixstate.py's panicstr: the release kernel's, until autoconfig relinks it
+
+# X-UP within DEADLINE seconds of T0; with "reboot", only after the screen has
+# left X for the PROM and the boot panel first.
+wait_x() {
+    local deadline=$1 mode=${2:-} left=0
+    while :; do
+        LINE=$(rsh "sleep 20; python3 $DBG/irixstate.py $PS_ARG" 2>&1 | tail -1)
+        K=$(echo "$LINE" | awk '{print $1}')
+        say "$LINE"
+        [ "$K" != X-UP ] && left=1
+        if [ "$K" = X-UP ] && { [ "$mode" != reboot ] || [ "$left" = 1 ]; }; then return 0; fi
+        [ "$K" = PANIC ] && { say "panicked, giving up" | tee -a "$LOG"; exit 1; }
+        [ $(( $(date +%s) - T0 )) -ge "$deadline" ] && { say "no login screen in $deadline s" | tee -a "$LOG"; exit 1; }
+    done
+}
+
+# Park the pointer in the chooser's first icon and type root (docs: the
+# desktop input recipe), then give the desktop time to settle.
+login() {
+    local steps=()
+    for i in $(seq 1 30); do steps+=("mouseMove:-60,-60" "sleep:0.05"); done
+    for i in $(seq 1 39); do steps+=("mouseMove:7,10" "sleep:0.05"); done
+    ws "${steps[@]}"
+    ws "text:root" "sleep:0.3" "kbdRaw:28"
+    rsh "sleep 40"
+}
+
+# Are kdsp_a2's rings running? Words moved over 10 s, and which channels.
+rings() {
+    local a b
+    a=$(aud); rsh "sleep 10"; b=$(aud)
+    say "$1: $b" | tee -a "$LOG"
+    say "$1: $(( $(words "$b") - $(words "$a") )) words in 10 s, channels $(running "$b")" | tee -a "$LOG"
+}
+
+wait_x 480
+rings "login screen"
 
 rsh "sleep 15"
 say "logging in as root"
-STEPS=()
-for i in $(seq 1 30); do STEPS+=("mouseMove:-60,-60" "sleep:0.05"); done
-for i in $(seq 1 39); do STEPS+=("mouseMove:7,10" "sleep:0.05"); done
-ws "${STEPS[@]}"
-ws "text:root" "sleep:0.3" "kbdRaw:28"
-rsh "sleep 40"
-B=$(aud); say "logged in:    $B" | tee -a "$LOG"
-P0=$(peak "$B")
+login
+say "logged in:    $(aud)" | tee -a "$LOG"
+
+if [ "$AUTOCONF" = 1 ]; then
+    # The kernel on the release images was configured with HAL2 absent (REV
+    # bit 15 set), so lboot left kdsp_a2 out: audio.sm's exprobe reads REV.
+    # Relink it now that the probe passes, and boot the new kernel - `init 6`
+    # moves /unix.install over /unix on the way down.
+    say "autoconfig -f, then init 6 onto the relinked kernel" | tee -a "$LOG"
+    ws "text:/etc/autoconfig -f > /usr/tmp/autoconfig.log 2>&1; sync; sync; init 6" "sleep:0.3" "kbdRaw:28"
+    T0=$(date +%s)
+    PS_ARG="--panicstr 0"     # every symbol moved; judge by the screen alone
+    wait_x 1500 reboot
+    say "relinked kernel up in $(( $(date +%s) - T0 )) s" | tee -a "$LOG"
+    rings "login screen, relinked kernel"
+    rsh "sleep 15"
+    say "logging in as root"
+    login
+    say "logged in:    $(aud)" | tee -a "$LOG"
+fi
+
+# PLAYBACK. The rings run in silence too, so words moving is not the test;
+# the samples are. `peak` is held since power-on (the PROM's tune already hit
+# full scale), so the verdict is on `last`: nonzero samples while it plays.
+W0=$(words "$(aud)")
 say "playing $SOUND"
 ws "text:playaiff $SOUND" "sleep:0.3" "kbdRaw:28"
-for i in 1 2 3 4 5 6; do rsh "sleep 3"; say "playing:      $(aud)" | tee -a "$LOG"; done
-C=$(aud); P1=$(peak "$C")
-if [ -n "$P0" ] && [ -n "$P1" ] && [ "$P1" -gt "$P0" ]; then
-    say "AUDIO PEAK ROSE $P0 -> $P1" | tee -a "$LOG"
+NZ=0
+for i in 1 2 3 4 5 6 7 8; do
+    rsh "sleep 2"; A=$(aud); L=$(lastsamp "$A")
+    say "playing:      $A" | tee -a "$LOG"
+    [ -n "$L" ] && [ "$L" != 0 ] && NZ=$((NZ + 1))
+done
+W1=$(words "$(aud)")
+say "while playing: $((W1 - W0)) words moved, $NZ of 8 samples nonzero" | tee -a "$LOG"
+if [ "$NZ" -ge 2 ]; then
+    say "AUDIO PLAYED" | tee -a "$LOG"
 else
-    say "AUDIO PEAK DID NOT RISE ($P0 -> $P1)" | tee -a "$LOG"
+    say "AUDIO NOT HEARD ON THE DAC" | tee -a "$LOG"
 fi
+
 say "halting"
 ws "text:init 0" "sleep:0.3" "kbdRaw:28"
 H=""
 for i in $(seq 1 12); do
     rsh "sleep 10"
-    S=$(rsh "python3 $DBG/irixstate.py" 2>&1 | tail -1)
+    S=$(rsh "python3 $DBG/irixstate.py $PS_ARG" 2>&1 | tail -1)
     say "$S"
-    case "$S" in PROM*|*panel*|*BOOTING*) H="$S"; break ;; esac
+    # Off X is the kernel alive enough to shut X down; the kdsp_a2 hang of
+    # 2026-09 froze the desktop with X on screen.
+    [ "$(echo "$S" | awk '{print $1}')" != X-UP ] && { H="$S"; break; }
 done
 say "after halt:   $(aud)" | tee -a "$LOG"
-[ -n "$H" ] && say "HALT REACHED THE PROM" | tee -a "$LOG" || say "HALT NOT SEEN (check the screen)" | tee -a "$LOG"
+[ -n "$H" ] && say "HALT: X LEFT THE SCREEN" | tee -a "$LOG" || say "HALT NOT SEEN: X STILL ON SCREEN" | tee -a "$LOG"
+
+if [ -n "$SAVEAS" ]; then
+    say "saving the image as $SAVEAS" | tee -a "$LOG"
+    rsh "echo 'load_core /media/fat/menu.rbf' > /dev/MiSTer_cmd; for i in \$(seq 1 30); do ls -l /proc/[0-9]*/fd 2>/dev/null | grep -q '$IMG\$' || break; sleep 1; done; cp '$IMG' '$SAVEAS' && sync && ls -l '$SAVEAS'" | tee -a "$LOG"
+fi
 say "done -> $LOG"
