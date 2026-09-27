@@ -1,0 +1,4 @@
+copy 11758622 bytes, disc 11758622 bytes
+CDFILE PASS: 0 bytes differ
+32841042d879fcb36a22d21eb6794b8f  /tmp/cdfile.bin
+32841042d879fcb36a22d21eb6794b8f  /tmp/cdfile.ref

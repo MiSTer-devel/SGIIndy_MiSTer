@@ -14,9 +14,11 @@
 # Console window. Here that is
 #
 #     mount -r -t efs /dev/dsk/dks0d6s7 /CDROM   (harmless: mediad has it)
-#     cp /CDROM/dist/NAME /usr/tmp/cdfile.bin; sync
+#     cp /CDROM/dist/NAME /var/tmp/cdfile.bin; sync
 #
 # then a halt (init 0), and ON THE BOARD the copy is lifted out of the disk
+# (from /var/tmp: /usr/tmp is a symlink to it and efsread.py does not follow
+# links - build 45b's first A/B lost its copies to that)
 # image and the original out of the ISO (both with efsread.py) and compared
 # byte by byte: every differing byte, with its offset in the file, its offset
 # in its 512-byte block, and what the disc holds there.
@@ -98,11 +100,11 @@ quit_swmgr
 
 S0=$(stats); B0=$(bytes_of "$S0")
 say "copying $FILE off the CD"
-ws "text:mkdir -p /CDROM; mount -r -t efs /dev/dsk/dks0d6s7 /CDROM; rm -f /usr/tmp/cdfile.bin" "sleep:0.3" "kbdRaw:28"
+ws "text:mkdir -p /CDROM; mount -r -t efs /dev/dsk/dks0d6s7 /CDROM; rm -f /var/tmp/cdfile.bin" "sleep:0.3" "kbdRaw:28"
 rsh "sleep 8"
 # The screen after the first command: evidence it reached a shell.
 bash scripts/grab.sh "${LOG%.log}-typed.png" >/dev/null 2>&1
-ws "text:cp /CDROM$FILE /usr/tmp/cdfile.bin; sync; sync" "sleep:0.3" "kbdRaw:28"
+ws "text:cp /CDROM$FILE /var/tmp/cdfile.bin; sync; sync" "sleep:0.3" "kbdRaw:28"
 TT=$(date +%s); TFIRST=0; PREV=$B0; STILL=0
 while :; do
     S=$(stats); B=$(bytes_of "$S"); NOW=$(date +%s)
@@ -128,7 +130,7 @@ ws "text:init 0" "sleep:0.3" "kbdRaw:28"
 rsh "sleep 60"
 
 # The comparison, on the board: both files are lifted into /tmp (RAM) there.
-rsh "cd $DBG && python3 efsread.py '$IMG' get /usr/tmp/cdfile.bin /tmp/cdfile.bin >/dev/null && python3 efsread.py '$ISO' get '$FILE' /tmp/cdfile.ref --part 7 >/dev/null" || { say "could not lift the files" | tee -a "$LOG"; exit 1; }
+rsh "cd $DBG && python3 efsread.py '$IMG' get /var/tmp/cdfile.bin /tmp/cdfile.bin >/dev/null && python3 efsread.py '$ISO' get '$FILE' /tmp/cdfile.ref --part 7 >/dev/null" || { say "could not lift the files" | tee -a "$LOG"; exit 1; }
 rsh "python3 - /tmp/cdfile.bin /tmp/cdfile.ref; rm -f /tmp/cdfile.bin /tmp/cdfile.ref" <<'PY' | tee -a "$LOG"
 import sys
 a = open(sys.argv[1], "rb").read()
