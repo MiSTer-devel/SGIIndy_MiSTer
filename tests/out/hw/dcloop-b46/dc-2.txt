@@ -1,0 +1,91 @@
+core: 91102e6b8bf76a68270e02f7d5a555cd (/tmp/SGIIndy.rbf)
+---- sumcheck on the board ----
+---- what IRIX computed (/root/sums.txt) ----
+6899 6199 /unix
+11858 2960 /lib/libc.so.1
+41170 2860 /usr/lib/libX11.so.1
+3511 5595 /usr/lib/libXm.so.1
+10734   6199 /unix
+05383   2960 /lib/libc.so.1
+63140   2860 /usr/lib/libX11.so.1
+01874   5595 /usr/lib/libXm.so.1
+
+---- the same files read off the image ----
+/unix: 3173840 bytes, md5 82bfc2cf1ac40b97b4281bd2c0bc129f; sysv 6899 6199 /unix [IRIX agrees]; bsd 10734  6199 /unix [IRIX agrees]
+/lib/libc.so.1: 1515300 bytes, md5 b821fafcd806a498c83333c74d2f5127; sysv 11858 2960 /lib/libc.so.1 [IRIX agrees]; bsd 05383  2960 /lib/libc.so.1 [IRIX agrees]
+/usr/lib/libX11.so.1: 1464000 bytes, md5 9c609b2ddae2b56fa73c2616077f2550; sysv 41170 2860 /usr/lib/libX11.so.1 [IRIX agrees]; bsd 63140  2860 /usr/lib/libX11.so.1 [IRIX agrees]
+/usr/lib/libXm.so.1: 2864640 bytes, md5 78755367b7f03e9ac5d1ca1875ae8b61; sysv 27664 5595 /usr/lib/libXm.so.1 [NO MATCH in IRIX's output]; bsd 09528  5595 /usr/lib/libXm.so.1 [NO MATCH in IRIX's output]
+copy check: /root/unix.copy is byte-identical to /unix (3173840 bytes)
+DISKCHECK FAIL
+---- efsdiff against /media/fat/games/SGIIndy/SGIIndy53-pristine.img ----
+7192 basic blocks differ (of 4108575)
+
+changed blocks by owner (used <- pristine):
+    6084  inode 16671 /root/unix.copy  <-  free
+     135  free  <-  free
+     113  inode 4286 /tmp/.ps_data  <-  free
+     111  inode 16671 /root/unix.copy  <-  inode 3029 /tmp/.ps_data
+      69  inode 6460 /var/Cadmin/data/database  <-  inode 6460 /var/Cadmin/data/database
+      39  superblock/bitmap area  <-  superblock/bitmap area
+       9  inode 6431 /var/tmp/.Xshmtrans0  <-  free
+       9  inode 1826 /var/adm/wtmpx  <-  free
+       8  inode 34134 /usr/tgcware/etc/prngd/prngd-seed  <-  inode 34134 /usr/tgcware/etc/prngd/prngd-seed
+       6  inode 1824 /var/adm/utmpx  <-  free
+       6  inode 3012 /tmp/.cadminOSSharedArena  <-  free
+       4  inode 6422 /var/adm/SYSLOG  <-  free
+       2  inode 6427 /etc/aliases.pag  <-  free
+       2  free  <-  inode 6427 /etc/aliases.pag
+       2  inode 6458 /var/Cadmin/data/index  <-  inode 6458 /var/Cadmin/data/index
+       1  inode table (inodes 0-3: -, -, /, /lost+found)  <-  inode table (inodes 0-3: -, -, /, /lost+found)
+       1  inode table (inodes 8-11: /usr, /var/inst/c_eoe, /usr/preserve, /bin)  <-  inode table (inodes 8-11: /usr, /var/inst/c_eoe, /usr/preserve, /bin)
+       1  inode table (inodes 12-15: /var/inst, /dev, /dev/abi, /etc/autoconfig)  <-  inode table (inodes 12-15: /var/inst, /dev, /dev/abi, /etc/autoconfig)
+       1  inode table (inodes 16-19: /etc, /var/inst/fw_KLJxearth, /usr/tmp_rex, /etc/chkconfig)  <-  inode table (inodes 16-19: /etc, /var/inst/fw_KLJxearth, /usr/tmp_rex, /etc/chkconfig)
+       1  inode table (inodes 20-23: /var/tmp, /etc/chroot, /etc/config, /etc/cron)  <-  inode table (inodes 20-23: /var/tmp, /etc/chroot, /etc/config, /etc/cron)
+       1  inode table (inodes 24-27: /var, /usr/tmp, /etc/.xlv_plexd_request_fifo, /etc/cron.d)  <-  inode table (inodes 24-27: /var, /usr/tmp, /etc/.xlv_plexd_request_fifo, /etc/cron.d)
+       1  inode table (inodes 32-35: /etc/gettapedev, /etc/getty, /etc/grpck, /etc/init)  <-  inode table (inodes 32-35: /etc/gettapedev, /etc/getty, /etc/grpck, /etc/init)
+       1  inode table (inodes 36-39: /etc/init.d, /etc/install, /etc/killall, /etc/link)  <-  inode table (inodes 36-39: /etc/init.d, /etc/install, /etc/killall, /etc/link)
+       1  inode table (inodes 52-55: /etc/pwck, /etc/rc0.d, /etc/rc0.d/K02xdm, /etc/rc0.d/K03announce)  <-  inode table (inodes 52-55: /etc/pwck, /etc/rc0.d, /etc/rc0.d/K02xdm, /etc/rc0.d/K03announce)
+       1  inode table (inodes 56-59: /etc/fsstat, /etc/fstyp, /etc/rc0.d/K15cron, /etc/rc0.d/K20mail)  <-  inode table (inodes 56-59: /etc/fsstat, /etc/fstyp, /etc/rc0.d/K15cron, /etc/rc0.d/K20mail)
+       1  inode table (inodes 64-67: /etc/rc0.d/K84filesystems, /etc/rc0.d/K98usr, /etc/rc2.d, /etc/rc2.d/S00announce)  <-  inode table (inodes 64-67: /etc/rc0.d/K84filesystems, /etc/rc0.d/K98usr, /etc/rc2.d, /etc/rc2.d/S00announce)
+       1  inode table (inodes 68-71: /etc/rc2.d/S04usr, /etc/rc2.d/S12filesystems, /etc/rc2.d/S16postinst, /etc/rc2.d/S20sysetup)  <-  inode table (inodes 68-71: /etc/rc2.d/S04usr, /etc/rc2.d/S12filesystems, /etc/rc2.d/S16postinst, /etc/rc2.d/S20sysetup)
+       1  inode table (inodes 72-75: /etc/rc2.d/S23autoconfig, /etc/rc2.d/S30network, /etc/rc2.d/S48savecore, /etc/rc2.d/S49swap)  <-  inode table (inodes 72-75: /etc/rc2.d/S23autoconfig, /etc/rc2.d/S30network, /etc/rc2.d/S48savecore, /etc/rc2.d/S49swap)
+       1  inode table (inodes 76-79: /etc/rc2.d/S50mail, /etc/rc2.d/S58rmtmpfiles, /etc/rc2.d/S75cron, /etc/rc2.d/S88configmsg)  <-  inode table (inodes 76-79: /etc/rc2.d/S50mail, /etc/rc2.d/S58rmtmpfiles, /etc/rc2.d/S75cron, /etc/rc2.d/S88configmsg)
+       1  inode table (inodes 80-83: /etc/rc2.d/S90chkdev, /etc/rc2.d/S96fontserver, /etc/rc2.d/S98xdm, /etc/rc3.d)  <-  inode table (inodes 80-83: /etc/rc2.d/S90chkdev, /etc/rc2.d/S96fontserver, /etc/rc2.d/S98xdm, /etc/rc3.d)
+       1  inode table (inodes 92-95: /etc/rc0.d/K40network, /etc/rc0.d/K80postinst, /etc/rc0.d/K82sysetup, /etc/rc0.d/K83swap)  <-  inode table (inodes 92-95: /etc/rc0.d/K40network, /etc/rc0.d/K80postinst, /etc/rc0.d/K82sysetup, /etc/rc0.d/K83swap)
+       1  inode table (inodes 100-103: /etc/uucp, /etc/wall, /etc/whodo, /etc/wtmp)  <-  inode table (inodes 100-103: /etc/uucp, /etc/wall, /etc/whodo, /etc/wtmp)
+       1  inode table (inodes 108-111: /opt/include, /opt/man, /sbin, /sbin/chgrp)  <-  inode table (inodes 108-111: /opt/include, /opt/man, /sbin, /sbin/chgrp)
+       1  inode table (inodes 112-115: /sbin/cp, /sbin/devnm, /sbin/jsh, /sbin/mv)  <-  inode table (inodes 112-115: /sbin/cp, /sbin/devnm, /sbin/jsh, /sbin/mv)
+       1  inode table (inodes 120-123: /usr/bin, /usr/bin/4d, /usr/bin/4d60, /usr/bin/[)  <-  inode table (inodes 120-123: /usr/bin, /usr/bin/4d, /usr/bin/4d60, /usr/bin/[)
+       1  inode table (inodes 124-127: /etc/telinit, /etc/uadmin, /etc/umount, /usr/bin/apropos)  <-  inode table (inodes 124-127: /etc/telinit, /etc/uadmin, /etc/umount, /usr/bin/apropos)
+       1  inode table (inodes 128-131: /usr/bin/awk, /usr/bin/basename, /usr/bin/cat, /usr/bin/chgrp)  <-  inode table (inodes 128-131: /usr/bin/awk, /usr/bin/basename, /usr/bin/cat, /usr/bin/chgrp)
+       1  inode table (inodes 140-143: /usr/bin/df, /usr/bin/echo, /usr/bin/ed, /usr/bin/edit)  <-  inode table (inodes 140-143: /usr/bin/df, /usr/bin/echo, /usr/bin/ed, /usr/bin/edit)
+       1  inode table (inodes 144-147: /usr/bin/env, /usr/bin/expr, /usr/bin/find, /usr/bin/grep)  <-  inode table (inodes 144-147: /usr/bin/env, /usr/bin/expr, /usr/bin/find, /usr/bin/grep)
+       1  inode table (inodes 148-151: /usr/bin/hinv, /usr/bin/ipcrm, /usr/bin/ipcs, /usr/bin/jsh)  <-  inode table (inodes 148-151: /usr/bin/hinv, /usr/bin/ipcrm, /usr/bin/ipcs, /usr/bin/jsh)
+       1  inode table (inodes 152-155: /usr/bin/ksh, /usr/bin/lfmt, /usr/bin/ln, /usr/bin/login)  <-  inode table (inodes 152-155: /usr/bin/ksh, /usr/bin/lfmt, /usr/bin/ln, /usr/bin/login)
+       1  inode table (inodes 156-159: /usr/bin/autopush, /usr/bin/ls, /usr/bin/m4, /usr/bin/m68000)  <-  inode table (inodes 156-159: /usr/bin/autopush, /usr/bin/ls, /usr/bin/m4, /usr/bin/m68000)
+       1  inode table (inodes 164-167: /usr/bin/mt, /usr/bin/multgrps, /usr/bin/mv, /usr/bin/nice)  <-  inode table (inodes 164-167: /usr/bin/mt, /usr/bin/multgrps, /usr/bin/mv, /usr/bin/nice)
+       1  inode table (inodes 172-175: /usr/bin/ps, /usr/bin/pwd, /usr/bin/red, /usr/bin/rksh)  <-  inode table (inodes 172-175: /usr/bin/ps, /usr/bin/pwd, /usr/bin/red, /usr/bin/rksh)
+       1  inode table (inodes 176-179: /usr/bin/rm, /usr/bin/sed, /usr/bin/settime, /usr/bin/sh)  <-  inode table (inodes 176-179: /usr/bin/rm, /usr/bin/sed, /usr/bin/settime, /usr/bin/sh)
+       1  inode table (inodes 200-203: /usr/bin/wc, /usr/bin/whatis, /usr/bin/who, /usr/bin/xargs)  <-  inode table (inodes 200-203: /usr/bin/wc, /usr/bin/whatis, /usr/bin/who, /usr/bin/xargs)
+       1  inode table (inodes 208-211: /usr/bsd/newaliases, /usr/bsd/script, /usr/bsd/uncompress, /usr/bsd/uptime)  <-  inode table (inodes 208-211: /usr/bsd/newaliases, /usr/bsd/script, /usr/bsd/uncompress, /usr/bsd/uptime)
+       1  inode table (inodes 212-215: /usr/bsd/zcat, /usr/cpu, /usr/cpu/sysgen, /usr/cpu/sysgen/IP22boot)  <-  inode table (inodes 212-215: /usr/bsd/zcat, /usr/cpu, /usr/cpu/sysgen, /usr/cpu/sysgen/IP22boot)
+       1  inode table (inodes 216-219: /usr/cpu/sysgen/IP22boot/pts.a, /usr/cpu/sysgen/IP22boot/socket.a, /usr/cpu/sysgen/root, /usr/cpu/sysgen/root/usr)  <-  inode table (inodes 216-219: /usr/cpu/sysgen/IP22boot/pts.a, /usr/cpu/sysgen/IP22boot/socket.a, /usr/cpu/sysgen/root, /usr/cpu/sysgen/root/usr)
+       1  inode table (inodes 260-263: /usr/lib/libc.so.1, /usr/sbin/df, /usr/sbin/mvdir, /usr/sbin/pathconf)  <-  inode table (inodes 260-263: /usr/lib/libc.so.1, /usr/sbin/df, /usr/sbin/mvdir, /usr/sbin/pathconf)
+       1  inode table (inodes 264-267: /usr/lib/libc_s.a, /usr/lib/libgl.so, /usr/lib/libgl_s, /usr/lib/libmalloc.so)  <-  inode table (inodes 264-267: /usr/lib/libc_s.a, /usr/lib/libgl.so, /usr/lib/libgl_s, /usr/lib/libmalloc.so)
+       1  inode table (inodes 280-283: /usr/lib/terminfo, /usr/lib/uucp, /usr/lib/uucp/Systems, /usr/mail)  <-  inode table (inodes 280-283: /usr/lib/terminfo, /usr/lib/uucp, /usr/lib/uucp/Systems, /usr/mail)
+       1  inode table (inodes 284-287: /usr/people, /usr/people/guest, /var/sysgen/system, /usr/sbin/sgikopt)  <-  inode table (inodes 284-287: /usr/people, /usr/people/guest, /var/sysgen/system, /usr/sbin/sgikopt)
+       1  inode table (inodes 320-323: /var/mail/:saved, /var/opt, /var/preserve, /var/spool)  <-  inode table (inodes 320-323: /var/mail/:saved, /var/opt, /var/preserve, /var/spool)
+       1  inode table (inodes 324-327: /var/spool/cron, /var/spool/cron/atjobs, /var/spool/cron/crontabs, /var/spool/mqueue)  <-  inode table (inodes 324-327: /var/spool/cron, /var/spool/cron/atjobs, /var/spool/cron/crontabs, /var/spool/mqueue)
+       1  inode table (inodes 328-331: /var/statmon, /var/sysgen, /usr/lib/filetype/install/swmgr.ftr, /var/sysgen/mtune)  <-  inode table (inodes 328-331: /var/statmon, /var/sysgen, /usr/lib/filetype/install/swmgr.ftr, /var/sysgen/mtune)
+       1  inode table (inodes 332-335: /usr/spool, /etc/.initpipe, /var/sysgen/boot, /var/sysgen/root)  <-  inode table (inodes 332-335: /usr/spool, /etc/.initpipe, /var/sysgen/boot, /var/sysgen/root)
+       1  inode table (inodes 336-339: /usr/var, /var/adm, /var/adm/crash, /var/sysgen/master.d)  <-  inode table (inodes 336-339: /usr/var, /var/adm, /var/adm/crash, /var/sysgen/master.d)
+       1  inode table (inodes 340-343: /var/adm/lastlog, /var/adm/mkpts, /var/adm/sa, /var/arch)  <-  inode table (inodes 340-343: /var/adm/lastlog, /var/adm/mkpts, /var/adm/sa, /var/arch)
+       1  inode table (inodes 344-347: /var/arch/lib, /var/arch/lib/libGL.so, /var/arch/lib/libGLcore.so, /var/arch/lib/libgl.so)  <-  inode table (inodes 344-347: /var/arch/lib, /var/arch/lib/libGL.so, /var/arch/lib/libGLcore.so, /var/arch/lib/libgl.so)
+
+copies of /unix (3173840 bytes):
+  /root/unix.copy: identical
+
+FOREIGN blocks (the inode is identical in both images, the data is not): 0
+EFSDIFF CLEAN
+keeping the used image as /media/fat/games/SGIIndy/SGIIndy53-fail-20260927-185450.img
+-rwxr-xr-x 1 root root 2147483648 Sep 27 18:59 /media/fat/games/SGIIndy/SGIIndy53-fail-20260927-185450.img
