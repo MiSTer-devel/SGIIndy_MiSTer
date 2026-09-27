@@ -140,23 +140,25 @@ if [ "$AUTOCONF" = 1 ]; then
     say "logged in:    $(aud)" | tee -a "$LOG"
 fi
 
-# PLAYBACK. The rings run in silence too, so words moving is not the test;
-# the samples are. `peak` is held since power-on (the PROM's tune already hit
-# full scale), so the verdict is on `last`: nonzero samples while it plays.
-W0=$(words "$(aud)")
+# PLAYBACK. kdsp_a2 starts its rings when something plays, not at boot (build
+# 45b: 0 words at the login screen, 496,122 words moved by one playaiff), and
+# `peak` is held since power-on - the PROM's tune already hit full scale - so
+# the verdict is on `last`: a sampler ON THE BOARD reads the beacon ten times
+# a second through the whole sound, started before the command is typed. The
+# first version sampled every few seconds from here and missed a 5 s sound.
+rsh "rm -f /tmp/aud.txt; (setsid python3 $DBG/bcnread.py --audio --loop 150 --interval 0.1 > /tmp/aud.txt 2>&1 &)"
 say "playing $SOUND"
 ws "text:playaiff $SOUND" "sleep:0.3" "kbdRaw:28"
-rsh "sleep 1"
+rsh "sleep 2"
 bash scripts/grab.sh "${LOG%.log}-playing.png" >/dev/null 2>&1
-NZ=0
-for i in 1 2 3 4 5 6 7 8; do
-    rsh "sleep 2"; A=$(aud); L=$(lastsamp "$A")
-    say "playing:      $A" | tee -a "$LOG"
-    [ -n "$L" ] && [ "$L" != 0 ] && NZ=$((NZ + 1))
-done
-W1=$(words "$(aud)")
-say "while playing: $((W1 - W0)) words moved, $NZ of 8 samples nonzero" | tee -a "$LOG"
-if [ "$NZ" -ge 2 ]; then
+rsh "sleep 12"
+rsh "grep ' audio:' /tmp/aud.txt" > "${LOG%.log}-samples.txt" 2>&1
+N=$(grep -c ' audio:' "${LOG%.log}-samples.txt")
+NZ=$(sed -n 's/.* last=\(-\{0,1\}[0-9]*\).*/\1/p' "${LOG%.log}-samples.txt" | grep -vc '^0$')
+W0=$(words "$(head -1 "${LOG%.log}-samples.txt")"); W1=$(words "$(tail -1 "${LOG%.log}-samples.txt")")
+RUN=$(grep -c 'running=0x[1-9a-f]' "${LOG%.log}-samples.txt")
+say "while playing: $((W1 - W0)) words moved; $N samples, $RUN with a channel running, $NZ with a nonzero sample" | tee -a "$LOG"
+if [ "$NZ" -ge 3 ]; then
     say "AUDIO PLAYED" | tee -a "$LOG"
 else
     say "AUDIO NOT HEARD ON THE DAC" | tee -a "$LOG"
