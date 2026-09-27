@@ -478,11 +478,13 @@ wire        txda, txdb;
 
 // SCSI debug beacon words out of the core (docs/28), to the writer below.
 wire [63:0] scsi_bcn [7];
-wire [63:0] scsi_stat [8];  // the disk-time counters (docs/design/scsi-block-cache.md; 5-6 ver 14, docs/design/scsi-sync-negotiation.md)
+wire [63:0] scsi_stat [8];
+wire        cmdlog_stb;     // the SCSI command log (build 47), see the beacon below
+wire [63:0] cmdlog;  // the disk-time counters (docs/design/scsi-block-cache.md; 5-6 ver 14, docs/design/scsi-sync-negotiation.md)
 wire [63:0] hpc3_dma_bcn;   // HPC3 SCSI0 DMA channel state (docs/29)
 wire [63:0] int_bcn [2];    // interrupt-delivery diagnostics (docs/29)
 wire [63:0] vdma_bcn [4];   // VDMA / Newport pixel-DMA diagnostics (docs/design/newport-vdma.md)
-wire [63:0] perf_bcn [12];  // CPU performance counters (docs/design/cpu-speed-tlb-icache.md; w9 build 37; w10 ver 13; w11 ver 16)
+wire [63:0] perf_bcn [13];  // CPU performance counters (docs/design/cpu-speed-tlb-icache.md; w9 build 37; w10 ver 13; w11 ver 16)
 wire [63:0] audio_bcn [3];  // HAL2 and the PBUS DMA engine (docs/design/audio.md; ver 15)
 
 sgi_indy u_core
@@ -598,9 +600,13 @@ sgi_indy u_core
 	// status[21], no OSD entry: setopt.sh ipf=off turns ram_arb's instruction
 	// prefetch buffer off, for measuring it (build 46).
 	.ipf_enable       (~status[21]),
+	// status[22], no OSD entry: setopt.sh dpf=off, the data buffer (build 47).
+	.dpf_enable       (~status[22]),
 
 	.dbg_scsi_bcn     (scsi_bcn),
 	.dbg_scsi_stat    (scsi_stat),
+	.dbg_cmdlog_stb   (cmdlog_stb),
+	.dbg_cmdlog       (cmdlog),
 	.dbg_hpc3_dma     (hpc3_dma_bcn),
 	.dbg_int_bcn      (int_bcn),
 	.dbg_vdma_bcn     (vdma_bcn),
@@ -878,7 +884,11 @@ ddr3_mux u_mem
 // ready, captures forced after the wait's limit} (wd33c93.sv dbg_din).
 // Word 47 (ver 16, build 46): {instruction fills answered from ram_arb's
 // prefetch buffer, fills that fetched the two lines after their own}.
-localparam int BCN_WORDS = 48;
+// Word 48 (ver 17, build 47): {data fills answered from ram_arb's data buffer,
+// data fills that fetched two lines on a stream}.
+// Word 49 (ver 17): the SCSI command log's state - {16'hC10C, 2'b0, the next
+// ring slot (14 bits), commands logged (32)}; the ring itself is below.
+localparam int BCN_WORDS = 50;
 
 // ---- DDR3 port performance counters (docs/design/cpu-speed-tlb-icache.md) ------------------------------
 // WHO HAS THE ONE PORT, AND WHO IS WAITING FOR IT. Everything the machine
@@ -937,8 +947,27 @@ reg         bcn_req;
 reg  [31:0] bcn_addr;
 reg  [63:0] bcn_wdata;
 
+// THE SCSI COMMAND LOG (build 47). Every command a target takes goes into an
+// 8-deep queue here and from it into a 16,384-entry ring at byte offset
+// 0x05810000 (ARM 0x35810000): whenever an entry is waiting, the beacon
+// writer's next slot goes to the ring instead of the next beacon word, so the
+// regular words only refresh a little slower. Word 49 says where the next
+// entry goes and how many were ever logged; tools/misterdeploy/scsilog.py
+// reads the ring. It is reset only when the core is loaded, so it spans IRIX
+// reboots. Written for the stray write: after a session in which a file
+// changed on the image although nothing wrote it, the log says whether IRIX
+// ever sent a WRITE to that file's blocks - a filesystem-level cause - or
+// never did, which puts the cause below the SCSI command.
+reg  [63:0] clog_q [8];
+reg   [2:0] clog_wp, clog_rp;
+reg   [3:0] clog_n;
+reg  [13:0] clog_idx;
+reg  [31:0] clog_total;
+wire        clog_pop  = (bcn_div == 6'd63) && (clog_n != 4'd0);
+wire        clog_push = cmdlog_stb && ((clog_n != 4'd8) || clog_pop);
+
 wire [63:0] bcn_src [BCN_WORDS];
-assign bcn_src[0] = { 16'hBEC0, 8'h10, 8'h00, bcn_beat };
+assign bcn_src[0] = { 16'hBEC0, 8'h11, 8'h00, bcn_beat };
 assign bcn_src[1] = scsi_bcn[0];
 assign bcn_src[2] = scsi_bcn[1];
 assign bcn_src[3] = scsi_bcn[2];
@@ -986,6 +1015,8 @@ assign bcn_src[44] = audio_bcn[1];
 assign bcn_src[45] = audio_bcn[2];
 assign bcn_src[46] = scsi_stat[7];
 assign bcn_src[47] = perf_bcn[11];
+assign bcn_src[48] = perf_bcn[12];
+assign bcn_src[49] = { 16'hC10C, 2'b00, clog_idx, clog_total };
 
 always @(posedge clk_sys) begin
 	if (~pll_locked) begin
@@ -995,10 +1026,29 @@ always @(posedge clk_sys) begin
 		bcn_req   <= 1'b0;
 		bcn_addr  <= 32'h0;
 		bcn_wdata <= 64'h0;
+		clog_wp    <= 3'd0;
+		clog_rp    <= 3'd0;
+		clog_n     <= 4'd0;
+		clog_idx   <= 14'd0;
+		clog_total <= 32'd0;
 	end else begin
 		bcn_req <= 1'b0;
 		bcn_div <= bcn_div + 6'd1;
-		if (bcn_div == 6'd63) begin
+		if (clog_push) begin
+			clog_q[clog_wp] <= cmdlog;
+			clog_wp         <= clog_wp + 3'd1;
+			clog_total      <= clog_total + 32'd1;
+		end
+		if (clog_push && !clog_pop)      clog_n <= clog_n + 4'd1;
+		else if (clog_pop && !clog_push) clog_n <= clog_n - 4'd1;
+		if (clog_pop) begin
+			// a logged command first: the beacon word waits for the next slot
+			bcn_req   <= 1'b1;
+			bcn_addr  <= 32'h0581_0000 + {15'd0, clog_idx, 3'b000};
+			bcn_wdata <= clog_q[clog_rp];
+			clog_rp   <= clog_rp + 3'd1;
+			clog_idx  <= clog_idx + 14'd1;
+		end else if (bcn_div == 6'd63) begin
 			bcn_req   <= 1'b1;
 			bcn_addr  <= 32'h0580_0000 + {23'd0, bcn_idx, 3'b000};
 			bcn_wdata <= bcn_src[bcn_idx];

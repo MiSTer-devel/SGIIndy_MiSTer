@@ -39,6 +39,7 @@ module sim_top
     input  wire        audio_en,
     // ram_arb's instruction prefetch buffer (build 46); --no-ipf clears it.
     input  wire        ipf_en,
+    input  wire        dpf_en,       // --no-dpf: its data buffer (build 47)
     output wire [15:0] audio_l,
     output wire [15:0] audio_r,
     output wire [63:0] audio0, audio1, audio2,
@@ -118,6 +119,10 @@ module sim_top
     // The CPU performance counters (docs/design/cpu-speed-tlb-icache.md), printed by the harness at exit.
     output wire [63:0] perf0, perf1, perf2, perf3, perf4, perf5, perf6, perf7, perf8,
     output wire [63:0] perf11,   // {prefetch-buffer hits, prefetching fills}
+    output wire [63:0] perf12,   // the same for the data buffer
+    // The SCSI command log's feed (build 47): printed with --cmdlog.
+    output wire        cmdlog_stb,
+    output wire [63:0] cmdlog,
     // The instruction cache's access stream, for --itrace.
     output wire [32:0] ifetch,
     // The data cache's, for --dtrace.
@@ -126,13 +131,14 @@ module sim_top
     output wire [39:0] int2_state
 );
 
-    wire [63:0] perf_bcn [12];
+    wire [63:0] perf_bcn [13];
     assign perf0 = perf_bcn[0]; assign perf1 = perf_bcn[1];
     assign perf2 = perf_bcn[2]; assign perf3 = perf_bcn[3];
     assign perf4 = perf_bcn[4]; assign perf5 = perf_bcn[5];
     assign perf6 = perf_bcn[6]; assign perf7 = perf_bcn[7];
     assign perf8 = perf_bcn[8];
     assign perf11 = perf_bcn[11];
+    assign perf12 = perf_bcn[12];
 
     wire        ram_req, ram_we, ram_ack, ram_last;
     wire [31:0] ram_addr;
@@ -208,6 +214,7 @@ module sim_top
         .scsi_din_lookahead(1'b1),
         .scsi_din_strict(1'b1),
         .ipf_enable(ipf_en),
+        .dpf_enable(dpf_en),
 
         .ps2_key       (ps2_key),
         .ps2_mouse     (ps2_mouse),
@@ -328,6 +335,8 @@ module sim_top
         .dbg_int_bcn   (),
         .dbg_vdma_bcn  (),
         .dbg_perf_bcn  (perf_bcn),
+        .dbg_cmdlog_stb(cmdlog_stb),
+        .dbg_cmdlog    (cmdlog),
         .dbg_ifetch    (ifetch),
         .dbg_dfetch    (dfetch),
         .irq_lines_o   (irq_lines),

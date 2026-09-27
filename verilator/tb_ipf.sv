@@ -28,6 +28,7 @@ reg reset = 1;
 
 // ---- DUT ---------------------------------------------------------------------
 reg          cpu_req = 0, cpu_we = 0, cpu_ifill = 0, pf_enable = 1;
+reg          cpu_dfill = 0, dpf_enable = 1;
 reg  [31:0]  cpu_addr = 0;
 reg  [63:0]  cpu_wdata = 0;
 reg   [7:0]  cpu_be = 8'hFF;
@@ -48,13 +49,14 @@ wire  [3:0]  ram_burst;
 wire [191:0] ram_wdata3;
 reg  [63:0]  ram_rdata = 0;
 reg          ram_ack = 0, ram_last = 0;
-wire         dbg_cpu_wait, dbg_dma_go, dbg_pf_hit, dbg_pf_fill;
+wire         dbg_cpu_wait, dbg_dma_go, dbg_pf_hit, dbg_pf_fill, dbg_dpf_hit, dbg_dpf_fill;
 
 ram_arb dut (
     .clk(clk), .reset(reset),
     .cpu_req(cpu_req), .cpu_we(cpu_we), .cpu_addr(cpu_addr), .cpu_wdata(cpu_wdata),
     .cpu_be(cpu_be), .cpu_burst(cpu_burst), .cpu_wdata3(cpu_wdata3),
     .cpu_ifill(cpu_ifill), .pf_enable(pf_enable),
+    .cpu_dfill(cpu_dfill), .dpf_enable(dpf_enable),
     .cpu_ack(cpu_ack), .cpu_last(cpu_last), .cpu_rdata(cpu_rdata),
     .dma_req(dma_req), .dma_we(dma_we), .dma_addr(dma_addr), .dma_wdata(dma_wdata),
     .dma_be(dma_be), .dma_ack(dma_ack), .dma_granted(dma_granted),
@@ -62,7 +64,8 @@ ram_arb dut (
     .ram_be(ram_be), .ram_burst(ram_burst), .ram_wdata3(ram_wdata3),
     .ram_rdata(ram_rdata), .ram_ack(ram_ack), .ram_last(ram_last),
     .dbg_cpu_wait(dbg_cpu_wait), .dbg_dma_go(dbg_dma_go),
-    .dbg_pf_hit(dbg_pf_hit), .dbg_pf_fill(dbg_pf_fill)
+    .dbg_pf_hit(dbg_pf_hit), .dbg_pf_fill(dbg_pf_fill),
+    .dbg_dpf_hit(dbg_dpf_hit), .dbg_dpf_fill(dbg_dpf_fill)
 );
 
 // ---- memory: 64 KB of doublewords, and the port in front of it ----------------
@@ -127,7 +130,7 @@ end
 
 // ---- checks on the CPU side -----------------------------------------------------
 int err_data = 0, err_unasked = 0, err_count = 0, err_hang = 0, cpu_txn = 0;
-int hits = 0, fills12 = 0;
+int hits = 0, fills12 = 0, dhits = 0, dfills12 = 0;
 bit cpu_waiting = 0, cpu_waiting_q = 0;
 // This process samples a clock behind the CPU task (it reads the values from
 // before the edge, the task those after it), so the task's last ack is seen
@@ -135,6 +138,8 @@ bit cpu_waiting = 0, cpu_waiting_q = 0;
 always @(posedge clk) begin
     if (!reset && dbg_pf_hit)  hits++;
     if (!reset && dbg_pf_fill) fills12++;
+    if (!reset && dbg_dpf_hit)  dhits++;
+    if (!reset && dbg_dpf_fill) dfills12++;
     if (!reset && cpu_ack && !cpu_waiting && !cpu_waiting_q) err_unasked++;
     cpu_waiting_q <= cpu_waiting;
 end
@@ -142,7 +147,7 @@ end
 // One CPU transaction: pulse, hold, collect. Reads are checked word by word.
 task automatic cpu_txn_do(input bit we, input logic [31:0] addr, input int burst,
                           input bit ifill, input logic [63:0] wd, input logic [7:0] be,
-                          input logic [191:0] wd3);
+                          input logic [191:0] wd3, input bit dfill = 0);
     logic [63:0] exp_old [4];
     logic [63:0] got [4];
     int nb = 0, t = 0;
@@ -150,7 +155,7 @@ task automatic cpu_txn_do(input bit we, input logic [31:0] addr, input int burst
     for (int i = 0; i < 4; i++) exp_old[i] = mem[addr[15:3] + i];
     @(posedge clk);
     cpu_req <= 1; cpu_we <= we; cpu_addr <= addr; cpu_burst <= 3'(burst);
-    cpu_ifill <= ifill; cpu_wdata <= wd; cpu_be <= be; cpu_wdata3 <= wd3;
+    cpu_ifill <= ifill; cpu_dfill <= dfill; cpu_wdata <= wd; cpu_be <= be; cpu_wdata3 <= wd3;
     cpu_waiting = 1;
     @(posedge clk);
     cpu_req <= 0;
@@ -173,12 +178,16 @@ task automatic cpu_txn_do(input bit we, input logic [31:0] addr, input int burst
                 if (err_data <= 6)
                     $display("    DATA addr %05h word %0d: got %016h, memory had %016h / has %016h (%s)",
                              addr, i, got[i], exp_old[i], mem[addr[15:3] + i],
-                             ifill ? "ifill" : "read");
+                             ifill ? "ifill" : dfill ? "dfill" : "read");
             end
 endtask
 
 task automatic ifill(input logic [31:0] line_addr);
     cpu_txn_do(0, {line_addr[31:5], 5'b0}, 4, 1, 64'h0, 8'hFF, 192'h0);
+endtask
+
+task automatic dfill(input logic [31:0] line_addr);
+    cpu_txn_do(0, {line_addr[31:5], 5'b0}, 4, 0, 64'h0, 8'hFF, 192'h0, 1);
 endtask
 
 // ---- the DMA master: holds until acknowledged -----------------------------------
@@ -207,16 +216,18 @@ task automatic check(input bit c, input string what);
     else begin fails++; $display("  FAIL %s", what); end
 endtask
 
-task automatic fresh(input bit en);
+task automatic fresh(input bit en, input bit den = 1);
     for (int i = 0; i < WORDS; i++) mem[i] = {32'(i), $urandom};
     pf_enable = en;
+    dpf_enable = den;
     reset = 1; repeat (4) @(posedge clk); reset = 0; repeat (2) @(posedge clk);
     err_data = 0; err_unasked = 0; err_count = 0; err_hang = 0; err_overlap = 0;
-    hits = 0; fills12 = 0; port_txn = 0; port_reads12 = 0; cpu_txn = 0; dma_txn = 0;
+    hits = 0; fills12 = 0; dhits = 0; dfills12 = 0; port_txn = 0; port_reads12 = 0; cpu_txn = 0; dma_txn = 0;
 endtask
 
 task automatic random_run(input int ntx);
     logic [31:0] line = 32'h2000;
+    logic [31:0] dline = 32'h3000;
     dma_run = 1;
     for (int k = 0; k < ntx; k++) begin
         int r = $urandom_range(0, 99);
@@ -227,7 +238,11 @@ task automatic random_run(input int ntx);
             line[15:13] = 3'b001;               // keep to 0x2000-0x3FFF
             ifill(line);
         end else if (r < 70) begin
-            cpu_txn_do(0, {16'h0, 3'b001, 8'($urandom), 5'b0}, 4, 0, 0, 8'hFF, 0);
+            // data fills: mostly a stream (bzero, bcopy), sometimes a jump
+            if ($urandom_range(0, 9) < 7) dline = dline + 32'd32;
+            else dline = {16'h0, 11'($urandom_range(0, 255)) + 11'h100, 5'b0};
+            dline[15:13] = 3'b001;
+            dfill(dline);
         end else if (r < 85) begin
             // a store into the code lines, any bytes
             cpu_txn_do(1, {16'h0, 3'b001, 10'($urandom), 3'b000}, 1, 0,
@@ -279,33 +294,57 @@ initial begin
     check(err_data == 0 && err_unasked == 0 && err_count == 0 && err_hang == 0 && err_overlap == 0,
           "every word right, nothing unasked, no overlap");
 
+    // D3 --------------------------------------------------------------------------
+    $display("D3 directed: a data stream bursts from its second line; a lone miss does not");
+    fresh(1, 1);
+    lat_lo = 12; lat_hi = 12;
+    dfill(32'h3000);
+    check(port_reads12 == 0, "the first data fill of a stream is a plain 4-word read");
+    dfill(32'h3020);
+    check(port_reads12 == 1, "the second line of the stream fetches two more");
+    t1 = port_txn;
+    dfill(32'h3040); dfill(32'h3060);
+    check(port_txn == t1 && dhits == 2, "which are answered with no port transaction");
+    dfill(32'h3080);
+    check(port_reads12 == 2, "and the stream bursts again at the line after them");
+    t1 = port_reads12;
+    dfill(32'h3800);
+    check(port_reads12 == t1, "a data fill off the stream does not burst");
+    // the instruction buffer is untouched by all that
+    ifill(32'h2400); ifill(32'h2420);
+    check(hits == 1, "the instruction buffer keeps its own lines");
+    check(err_data == 0 && err_unasked == 0 && err_count == 0 && err_hang == 0 && err_overlap == 0,
+          "every word right, nothing unasked, no overlap");
+
     // D2 --------------------------------------------------------------------------
-    $display("D2 directed: the buffer off");
-    fresh(0);
+    $display("D2 directed: both buffers off");
+    fresh(0, 0);
     ifill(32'h2400); ifill(32'h2420); ifill(32'h2440);
-    check(port_reads12 == 0 && hits == 0 && port_txn == 3, "three fills, three 4-word reads, no hits");
+    dfill(32'h3000); dfill(32'h3020); dfill(32'h3040);
+    check(port_reads12 == 0 && hits == 0 && dhits == 0 && port_txn == 6, "six fills, six 4-word reads, no hits");
 
     // R1 --------------------------------------------------------------------------
     $display("R1 random, buffer on: 60,000 CPU transactions, DMA underneath, latency 3-30");
     fresh(1);
     lat_lo = 3; lat_hi = 30;
     random_run(60000);
-    $display("    %0d CPU transactions, %0d DMA, %0d port transactions, %0d hits, %0d 12-word fills",
-             cpu_txn, dma_txn, port_txn, hits, fills12);
+    $display("    %0d CPU transactions, %0d DMA, %0d port transactions; instruction %0d hits %0d bursts; data %0d hits %0d bursts",
+             cpu_txn, dma_txn, port_txn, hits, fills12, dhits, dfills12);
     check(err_data == 0,    $sformatf("every word the CPU got was memory's (%0d wrong)", err_data));
     check(err_overlap == 0, $sformatf("the port never saw two transactions (%0d)", err_overlap));
     check(err_unasked == 0, $sformatf("no unasked acknowledge (%0d)", err_unasked));
     check(err_count == 0,   $sformatf("every transaction answered its length (%0d not)", err_count));
     check(err_hang == 0,    $sformatf("no transaction hung (%0d)", err_hang));
-    check(hits > 5000,      "the buffer answered fills");
+    check(hits > 5000,      "the instruction buffer answered fills");
+    check(dhits > 500,      "the data buffer answered fills");
 
     // R2 --------------------------------------------------------------------------
-    $display("R2 random, buffer off: the control");
-    fresh(0);
+    $display("R2 random, both buffers off: the control");
+    fresh(0, 0);
     random_run(20000);
     check(err_data == 0 && err_overlap == 0 && err_unasked == 0 && err_count == 0 && err_hang == 0,
           "everything right with the buffer off");
-    check(hits == 0 && port_reads12 == 0, "and it stays off");
+    check(hits == 0 && dhits == 0 && port_reads12 == 0, "and they stay off");
 
     $display("tb_ipf: %0d checks, %0d failed", checks, fails);
     if (fails == 0) $display("IPF: PASS");

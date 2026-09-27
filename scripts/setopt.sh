@@ -30,6 +30,7 @@
 #   ipf=on|off           status[21], no OSD entry: ram_arb's instruction prefetch
 #                                  buffer (build 46); off = every instruction
 #                                  fill one 4-word read, as before
+#   dpf=on|off           status[22], no OSD entry: its data buffer (build 47)
 #
 # Usage: bash scripts/setopt.sh gfx=none uartdbg=ser
 #        bash scripts/setopt.sh            # all defaults
@@ -59,6 +60,7 @@ FIELDS = {                       # name: (low bit, width, {value: code})
     "dinstrict": (20, 1, {"on": 0, "off": 1}),
     # No OSD entry: ram_arb's instruction prefetch buffer.
     "ipf":     (21, 1, {"on": 0, "off": 1}),
+    "dpf":     (22, 1, {"on": 0, "off": 1}),
 }
 st = 0
 for arg in sys.argv[1:]:

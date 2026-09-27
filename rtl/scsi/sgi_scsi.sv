@@ -135,7 +135,11 @@ module sgi_scsi #(
     // were busy, how long the SCSI bus was, how many bytes crossed it in DATA
     // phases, and the cache's hits / misses / writes. Counters, not state:
     // read twice, subtract, and the difference is the boot's disk seconds.
-    output logic [63:0]             dbg_stat [8]
+    output logic [63:0]             dbg_stat [8],
+    // SGI (build 47): the command log - each target's commands as they are
+    // taken (scsi.v dbg_cmdlog). One bus, one command at a time.
+    output logic                    dbg_cmdlog_stb,
+    output logic [63:0]             dbg_cmdlog
 );
 
     // ---- port decode -------------------------------------------------------
@@ -177,6 +181,8 @@ module sgi_scsi #(
     wire [63:0]            t_bcn_a [NUM_TARGETS];
     wire [63:0]            t_bcn_b [NUM_TARGETS];
     wire [63:0]            t_bcn_s [NUM_TARGETS];
+    wire [NUM_TARGETS-1:0] t_clog_stb;
+    wire [63:0]            t_clog  [NUM_TARGETS];
     wire [63:0]            wd_bcn;
 
     // Open-collector OR. Only the selected target drives anything.
@@ -410,6 +416,8 @@ module sgi_scsi #(
                     .dbg_bcn_a      (t_bcn_a[t]),
                     .dbg_bcn_b      (t_bcn_b[t]),
                     .dbg_bcn_stk    (t_bcn_s[t]),
+                    .dbg_cmdlog_stb (t_clog_stb[t]),
+                    .dbg_cmdlog     (t_clog[t]),
                     .dbg_mounted    (),
                     .dbg_phase      (),
                     .dbg_hs         (),
@@ -472,9 +480,18 @@ module sgi_scsi #(
                 assign t_bcn_a[t] = 64'h0;
                 assign t_bcn_b[t] = 64'h0;
                 assign t_bcn_s[t] = 64'h0;
+                assign t_clog_stb[t] = 1'b0;
+                assign t_clog[t]     = 64'h0;
             end
         end
     endgenerate
+
+    always_comb begin
+        dbg_cmdlog_stb = |t_clog_stb;
+        dbg_cmdlog     = 64'h0;
+        for (int k = 0; k < NUM_TARGETS; k++)
+            if (t_clog_stb[k]) dbg_cmdlog = dbg_cmdlog | t_clog[k];
+    end
 
     // PER SLOT, NOT MUXED - still. This used to be a last-match-wins mux over
     // every requesting target ("only the target currently on the bus has an

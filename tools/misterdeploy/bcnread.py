@@ -55,7 +55,7 @@ _m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(_m)
 
 BASE = 0x35800000
-NWORDS = 48
+NWORDS = 50
 CLK_HZ = 50_000_000          # clk_sys; the x64 counters are in units of 64 cycles
 PHASES = ["IDLE", "CMD_IN", "DATA_OUT", "DATA_IN", "STATUS", "MSG_IN", "TB", "MSG_OUT"]
 DSTATES = ["IDLE", "FETCH_LO", "FETCH_LO_W", "FETCH_HI", "FETCH_HI_W", "EVAL",
@@ -298,6 +298,9 @@ def main():
                 # fills}, appended so perfdiff.py's positions do not move
                 if ver >= 16:
                     vals += [bits(ws[47], 63, 32), bits(ws[47], 31, 0)]
+                # ver 17 (build 47): word 48, the data buffer's {hits, stream fills}
+                if ver >= 17:
+                    vals += [bits(ws[48], 63, 32), bits(ws[48], 31, 0)]
                 print("perf %.3f beat=%d %s" % (time.time(), bits(ws[0], 31, 0),
                                                " ".join(str(v) for v in vals)))
         elif a.audio:

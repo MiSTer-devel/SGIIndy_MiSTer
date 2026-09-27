@@ -1,0 +1,23 @@
+start Sun Sep 27 18:47:33 EDT 2026
+synced
+unit ipf rc=0 tb_ipf: 23 checks, 0 failed IPF: PASS 
+unit cbig rc=0 tb_scsi_cache_big: 29931 checks, 0 failed SCSICACHEBIG: PASS 
+unit scsidma rc=0 tb_scsidma: 26 checks, 0 failed SCSIDMA: PASS 
+unit ramarb rc=0 
+  ramarb lat 1: ram_arb: PASS
+  ramarb lat 12: ram_arb: PASS
+  ramarb lat 60: ram_arb: PASS
+unit ddr3 rc=0 
+unit hpc3 rc=0 T7 done: 24710 checks, 0 errors TB_HPC3 PASS (24710 checks) 
+unit audio rc=0 69 checks, 0 failures; 2298 memory transactions TB_AUDIO PASS 
+-rwxr-xr-x 1 dani dani 1552584 Sep 27 18:49 /home/dani/sgimd/verilator/obj_wm/Vsim_top
+cputest-off rc=55 49s  RESULT: 2109 checks passed, 55 failed  (240 tests) | perf: instruction fills answered from the prefetch buffer 0, fills that fetched the next two lines 0 (--no-ipf) perf: data fills answered from the data buffer 0, stream fills that fetched the next two lines 0 (--no-dpf) 
+cputest-on rc=55 49s  RESULT: 2109 checks passed, 55 failed  (240 tests) | perf: instruction fills answered from the prefetch buffer 1660, fills that fetched the next two lines 1531 perf: data fills answered from the data buffer 7085, stream fills that fetched the next two lines 3982 
+dma rc=0 79s DMA: ALL PASS 00000000 DMA: PASS 
+scsiwr rc=0 122s SCSIWR: ALL PASS 00000000 SCSIWR: PASS 
+cmdlog rc=0 132s scsi.v printed 11 commands, the log carried 11    (10, 1, 1, 0) (10, 1, 1, 0)    (8, 1, 1, 0) (8, 1, 1, 0)    (10, 1, 4, 8) (10, 1, 4, 8) CMDLOG PASS (0 differ) 
+prom rc=0 811s PROM: PASS 
+scsi rc=0 820s SCSI: PASS 
+cdrom rc=0 831s CDROM: PASS 
+audio rc=0 1052s   TUNE CHECK PASS AUDIO: PASS 
+done Sun Sep 27 19:06:35 EDT 2026

@@ -119,6 +119,10 @@ module ram_arb (
     // held with the payload.
     input  logic        cpu_ifill,
     input  logic        pf_enable,
+    // The request is a DATA line fill (r4300_bus bus_dfill, build 47), and
+    // the data buffer's switch.
+    input  logic        cpu_dfill,
+    input  logic        dpf_enable,
     output logic        cpu_ack,
     output logic        cpu_last,
     // The word that goes with cpu_ack: the port's, or the buffer's.
@@ -156,7 +160,10 @@ module ram_arb (
     // build 46: an instruction fill answered from the buffer / one that
     // fetched the next two lines
     output logic        dbg_pf_hit,
-    output logic        dbg_pf_fill
+    output logic        dbg_pf_fill,
+    // build 47: the same for data line fills
+    output logic        dbg_dpf_hit,
+    output logic        dbg_dpf_fill
 );
 
     // Whether this port has a transaction outstanding, and whose it is. Both
@@ -170,33 +177,49 @@ module ram_arb (
     // gone.
     logic cpu_wait;
 
-    // ---- the prefetch buffer ------------------------------------------------
-    logic [26:0] pf_tag;        // RAM offset >> 5 of the buffer's first line
-    logic [26:0] pf_tag1;       // pf_tag + 1, registered: the compare stays an equality
-    logic  [1:0] pf_v;          // each line whole, and not written since
-    logic [63:0] pf_mem [8];    // line 0 in words 0-3, line 1 in 4-7
+    // ---- the prefetch buffers: [0] instruction lines, [1] data lines --------
+    logic [26:0] pf_tag  [2];   // RAM offset >> 5 of each buffer's first line
+    logic [26:0] pf_tag1 [2];   // pf_tag + 1, registered: the compares stay equalities
+    logic  [1:0] pf_v    [2];   // each line whole, and not written since
+    logic [63:0] pf_mem  [16];  // buffer b, line l, word w at {b, l, w}
     logic        pf_run;        // the CPU's transaction is a 12-word burst
+    logic        pf_buf;        // ...filling this buffer
     logic  [3:0] pf_beat;       // its words received so far
-    logic        srv;           // answering a fill from the buffer
-    logic  [1:0] srv_beat;
+    logic        srv;           // answering a fill from a buffer
+    logic        srv_buf;
     logic        srv_line;
+    logic  [1:0] srv_beat;
+    // THE DATA SIDE PREFETCHES ONLY A STREAM (build 47). An instruction miss
+    // is followed by the next line half the time; a data miss is too when the
+    // code is bzero or bcopy (87 % of the boot's data misses) and almost never
+    // when it is a sort over a big table, where eight words fetched for nothing
+    // are eight clocks of port that another fill waits behind. So a data fill
+    // bursts only when its line is the one after the previous data fill's -
+    // the second line of a stream on - which the boot replay says keeps nearly
+    // all of the gain (42.5 % of the data fills left, against 40.9 % bursting
+    // on every miss).
+    logic [26:0] d_next;
 
     wire        cpu_pend = cpu_req | cpu_wait;
     wire [26:0] req_line = cpu_addr[31:5];
     wire        is_ifill = cpu_ifill && !cpu_we && (cpu_burst == 3'd4);
-    wire        hit0     = pf_v[0] && (req_line == pf_tag);
-    wire        hit1     = pf_v[1] && (req_line == pf_tag1);
-    wire        pf_hit   = pf_enable && is_ifill && (hit0 || hit1);
+    wire        is_dfill = cpu_dfill && !cpu_we && (cpu_burst == 3'd4);
+    wire        rb       = is_dfill;          // the buffer this fill looks in
+    wire        en       = is_ifill ? pf_enable : is_dfill ? dpf_enable : 1'b0;
+    wire        hit0     = pf_v[rb][0] && (req_line == pf_tag[rb]);
+    wire        hit1     = pf_v[rb][1] && (req_line == pf_tag1[rb]);
+    wire        pf_hit   = en && (hit0 || hit1);
+    wire        stream   = !is_dfill || (req_line == d_next);
 
     // THE CPU WINS EVERY TIE, which is why `dma_go` subtracts it. That is not
     // politeness either: the CPU is the one master here that stalls a pipeline
     // while it waits, and the DMA engines are streaming into buffers nobody is
-    // watching yet. A fill the buffer answers takes nothing from the port, so
-    // a DMA transaction may be issued in the same clock.
+    // watching yet. A fill a buffer answers takes nothing from the port, so a
+    // DMA transaction may be issued in the same clock.
     wire cpu_go     = cpu_pend & ~inflight & ~srv;
     wire cpu_go_hit = cpu_go & pf_hit;
     wire cpu_go_ram = cpu_go & ~pf_hit;
-    wire pf_new     = cpu_go_ram & pf_enable & is_ifill;
+    wire pf_new     = cpu_go_ram & en & stream;
     wire dma_go     = dma_req & ~inflight & ~cpu_go_ram;
 
     // Writes issued to the port, for the snoop.
@@ -213,14 +236,20 @@ module ram_arb (
             inflight  <= 1'b0;
             owner_dma <= 1'b0;
             cpu_wait  <= 1'b0;
-            pf_v      <= 2'b00;
-            pf_run    <= 1'b0;
-            pf_beat   <= 4'd0;
-            srv       <= 1'b0;
-            srv_beat  <= 2'd0;
-            srv_line  <= 1'b0;
-            pf_tag    <= 27'd0;
-            pf_tag1   <= 27'd1;
+            pf_v[0]    <= 2'b00;
+            pf_v[1]    <= 2'b00;
+            pf_run     <= 1'b0;
+            pf_buf     <= 1'b0;
+            pf_beat    <= 4'd0;
+            srv        <= 1'b0;
+            srv_buf    <= 1'b0;
+            srv_beat   <= 2'd0;
+            srv_line   <= 1'b0;
+            pf_tag[0]  <= 27'd0;
+            pf_tag[1]  <= 27'd0;
+            pf_tag1[0] <= 27'd1;
+            pf_tag1[1] <= 27'd1;
+            d_next     <= 27'd0;
         end else begin
             // Remember a pulse that could not be issued; forget it once it is.
             if (cpu_req && !cpu_go) cpu_wait <= 1'b1;
@@ -239,6 +268,7 @@ module ram_arb (
             // ---- a fill answered from the buffer: four words, one a clock
             if (cpu_go_hit) begin
                 srv      <= 1'b1;
+                srv_buf  <= rb;
                 srv_beat <= 2'd0;
                 srv_line <= !hit0;
             end else if (srv) begin
@@ -252,24 +282,30 @@ module ram_arb (
                 pf_beat <= 4'd0;
             end
             if (pf_new) begin
-                pf_tag  <= req_line + 27'd1;
-                pf_tag1 <= req_line + 27'd2;
-                pf_v   <= 2'b00;
+                pf_buf      <= rb;
+                pf_tag[rb]  <= req_line + 27'd1;
+                pf_tag1[rb] <= req_line + 27'd2;
+                pf_v[rb]    <= 2'b00;
             end
+            // The data stream moves on with every data line fill, answered
+            // here or not.
+            if (cpu_go && is_dfill) d_next <= req_line + 27'd1;
             if (port_cpu_word && pf_run) begin
                 pf_beat <= pf_beat + 4'd1;
-                if (pf_beat >= 4'd4) pf_mem[3'(pf_beat - 4'd4)] <= ram_rdata;
-                if (pf_beat == 4'd7)  pf_v[0] <= 1'b1;
+                if (pf_beat >= 4'd4) pf_mem[{pf_buf, 3'(pf_beat - 4'd4)}] <= ram_rdata;
+                if (pf_beat == 4'd7)  pf_v[pf_buf][0] <= 1'b1;
                 if (pf_beat == 4'd11) begin
-                    pf_v[1] <= 1'b1;
-                    pf_run  <= 1'b0;
+                    pf_v[pf_buf][1] <= 1'b1;
+                    pf_run          <= 1'b0;
                 end
             end
 
-            // ---- the snoop: a write into a buffered line forgets it
+            // ---- the snoop: a write into a buffered line forgets it, in both
             if (wr_issue) begin
-                if (wr_line == pf_tag)          pf_v[0] <= 1'b0;
-                if (wr_line == pf_tag1)         pf_v[1] <= 1'b0;
+                for (int b = 0; b < 2; b++) begin
+                    if (wr_line == pf_tag[b])  pf_v[b][0] <= 1'b0;
+                    if (wr_line == pf_tag1[b]) pf_v[b][1] <= 1'b0;
+                end
             end
         end
     end
@@ -287,7 +323,7 @@ module ram_arb (
     assign cpu_last    = srv    ? (srv_beat == 2'd3)
                        : pf_run ? (pf_beat == 4'd3)
                        :          ram_last;
-    assign cpu_rdata   = srv ? pf_mem[{srv_line, srv_beat}] : ram_rdata;
+    assign cpu_rdata   = srv ? pf_mem[{srv_buf, srv_line, srv_beat}] : ram_rdata;
     assign dma_ack     = ram_ack &  owner_dma;
     assign dma_granted = dma_go;
 
@@ -295,7 +331,9 @@ module ram_arb (
     // engines' (the CPU never overlaps its own) - and the clocks it waited.
     assign dbg_cpu_wait = cpu_pend & inflight;
     assign dbg_dma_go   = dma_go;
-    assign dbg_pf_hit   = cpu_go_hit;
-    assign dbg_pf_fill  = pf_new;
+    assign dbg_pf_hit   = cpu_go_hit & ~rb;
+    assign dbg_pf_fill  = pf_new & ~rb;
+    assign dbg_dpf_hit  = cpu_go_hit &  rb;
+    assign dbg_dpf_fill = pf_new &  rb;
 
 endmodule

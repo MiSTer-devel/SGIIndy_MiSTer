@@ -101,6 +101,8 @@ module sgi_indy #(
     // ram_arb's instruction prefetch buffer (build 46): on normally; off is
     // the A/B for measuring it.
     input  logic        ipf_enable,
+    // ...and its data buffer, which bursts only on a stream (build 47).
+    input  logic        dpf_enable,
 
     // Megabytes of DRAM actually fitted. Drives the MC's bank decode; on
     // hardware this is a constant and folds away.
@@ -261,7 +263,7 @@ module sgi_indy #(
     output logic        dbg_retire,
     // The CPU performance counters (docs/design/cpu-speed-tlb-icache.md), nine beacon words. See the
     // block that builds them for the layout.
-    output logic [63:0] dbg_perf_bcn [12],
+    output logic [63:0] dbg_perf_bcn [13],
     // The instruction cache's access stream (simulator --itrace; the board
     // leaves it unconnected). See cpu.vhd's dbg_ifetch.
     output logic [32:0] dbg_ifetch,
@@ -273,6 +275,9 @@ module sgi_indy #(
     output logic [63:0] dbg_scsi_bcn [7],
     // SGI: the disk-time counters (docs/design/scsi-block-cache.md), five words from sgi_scsi.
     output logic [63:0] dbg_scsi_stat [8],
+    // The SCSI command log (build 47): a strobe per command and its entry.
+    output logic        dbg_cmdlog_stb,
+    output logic [63:0] dbg_cmdlog,
     // The HPC3 SCSI0 DMA channel's live state (docs/29), a separate beacon
     // word - the engine lives in sgi_hpc3, not sgi_scsi.
     output logic [63:0] dbg_hpc3_dma,
@@ -405,6 +410,7 @@ module sgi_indy #(
     logic  [2:0] bus_aoff;
     logic  [2:0] bus_burst;
     logic        bus_ifill;
+    logic        bus_dfill;
     logic        bus_last;
 
     r4300_bus u_bus (
@@ -431,6 +437,7 @@ module sgi_indy #(
         .bus_aoff      (bus_aoff),
         .bus_burst     (bus_burst),
         .bus_ifill     (bus_ifill),
+        .bus_dfill     (bus_dfill),
         .bus_wdata3    (bus_wdata3),
         .bus_rdata     (bus_rdata),
         .bus_ack       (bus_ack),
@@ -584,7 +591,7 @@ module sgi_indy #(
     wire arb_cpu_wait, arb_dma_go;     // observation only: the counters below
     wire cpu_ram_ack;
     wire [63:0] cpu_ram_rdata;   // the port's word, or ram_arb's prefetch buffer's
-    wire arb_pf_hit, arb_pf_fill;
+    wire arb_pf_hit, arb_pf_fill, arb_dpf_hit, arb_dpf_fill;
     wire cpu_ram_last;
     wire dma_port_ack;
     wire dma_grant;
@@ -602,6 +609,8 @@ module sgi_indy #(
         .cpu_wdata3 (bus_wdata3),
         .cpu_ifill  (bus_ifill),
         .pf_enable  (ipf_enable),
+        .cpu_dfill  (bus_dfill),
+        .dpf_enable (dpf_enable),
         .cpu_ack    (cpu_ram_ack),
         .cpu_last   (cpu_ram_last),
         .cpu_rdata  (cpu_ram_rdata),
@@ -628,7 +637,9 @@ module sgi_indy #(
         .dbg_cpu_wait(arb_cpu_wait),
         .dbg_dma_go  (arb_dma_go),
         .dbg_pf_hit  (arb_pf_hit),
-        .dbg_pf_fill (arb_pf_fill)
+        .dbg_pf_fill (arb_pf_fill),
+        .dbg_dpf_hit (arb_dpf_hit),
+        .dbg_dpf_fill(arb_dpf_fill)
     );
 
     // The engine's addresses are physical, so they go through the same MEMCFG
@@ -924,7 +935,9 @@ module sgi_indy #(
         .din_lookahead_en (scsi_din_lookahead),
         .din_strict   (scsi_din_strict),
         .dbg_bcn      (dbg_scsi_bcn),
-        .dbg_stat     (dbg_scsi_stat)
+        .dbg_stat     (dbg_scsi_stat),
+        .dbg_cmdlog_stb(dbg_cmdlog_stb),
+        .dbg_cmdlog   (dbg_cmdlog)
     );
 
     // The rest of the IOC window: panel, SYS_ID, reset/LED, and the INT2
@@ -1025,7 +1038,7 @@ module sgi_indy #(
                  pc_ifill_bus, pc_dfill_bus, pc_bus, pc_arb_wait;
     logic [31:0] pc_ifills, pc_dfills, pc_wbbeats, pc_ufetch, pc_tlbi_walks,
                  pc_tlbd_walks, pc_memreq, pc_irefills, pc_icached, pc_dma_n,
-                 pc_pf_hits, pc_pf_fills;
+                 pc_pf_hits, pc_pf_fills, pc_dpf_hits, pc_dpf_fills;
 
     always_ff @(posedge clk) begin
         if (reset) begin
@@ -1053,6 +1066,8 @@ module sgi_indy #(
             pc_dma_n      <= '0;
             pc_pf_hits    <= '0;
             pc_pf_fills   <= '0;
+            pc_dpf_hits   <= '0;
+            pc_dpf_fills  <= '0;
         end else begin
             pf_tlbd_q <= pf_tlbd;
             pf_tlbi_q <= pf_tlbi;
@@ -1078,6 +1093,8 @@ module sgi_indy #(
             if (arb_dma_go)             pc_dma_n      <= pc_dma_n + 32'd1;
             if (arb_pf_hit)             pc_pf_hits    <= pc_pf_hits + 32'd1;
             if (arb_pf_fill)            pc_pf_fills   <= pc_pf_fills + 32'd1;
+            if (arb_dpf_hit)            pc_dpf_hits   <= pc_dpf_hits + 32'd1;
+            if (arb_dpf_fill)           pc_dpf_fills  <= pc_dpf_fills + 32'd1;
         end
     end
 
@@ -1098,6 +1115,9 @@ module sgi_indy #(
     // w11 {instruction fills answered from ram_arb's prefetch buffer, fills
     // that fetched the two lines after their own} (build 46, beacon ver 16).
     assign dbg_perf_bcn[11] = { pc_pf_hits, pc_pf_fills };
+    // w12 {data fills answered from ram_arb's data buffer, data fills that
+    // fetched two lines on a stream} (build 47, beacon ver 17).
+    assign dbg_perf_bcn[12] = { pc_dpf_hits, pc_dpf_fills };
 
     // VDMA beacon words (docs/design/newport-vdma.md): the MC engine, the descriptor, and the
     // Newport's view of what arrived - enough to say from the board which

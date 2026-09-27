@@ -209,6 +209,8 @@ struct Options {
     // The audio switch, and where --wav writes the DAC's output.
     bool        audio = false;
     bool        ipf = true;       // ram_arb's instruction prefetch buffer
+    bool        dpf = true;       // ...and its data buffer
+    bool        cmdlog = false;   // print the SCSI command log's entries
     std::string wav;
     uint32_t    wav_rate = 44100;
     // Which cpu_error bits abort the run. See kErrorNames: only the two that
@@ -337,6 +339,8 @@ static void usage()
         "  --scsi-nocache    bypass the SCSI block cache (docs/design/scsi-block-cache.md): every block\n"
         "                    request is one HPS transaction, as before build 26\n"
         "  --no-ipf          ram_arb's instruction prefetch buffer off (build 46)\n"
+        "  --no-dpf          ...and its data buffer (build 47)\n"
+        "  --cmdlog          print every SCSI command log entry (build 47)\n"
         "  --audio           fit the audio (HAL2 reports itself present); the\n"
         "                    PROM then plays its startup tune\n"
         "  --wav FILE        implies --audio: write the DAC's output as a 16-bit\n"
@@ -440,6 +444,8 @@ int main(int argc, char **argv)
         else if (a == "--no-gfx")     opt.gfx = false;
         else if (a == "--audio")      opt.audio = true;
         else if (a == "--no-ipf")     opt.ipf = false;
+        else if (a == "--no-dpf")     opt.dpf = false;
+        else if (a == "--cmdlog")     opt.cmdlog = true;
         else if (a == "--wav")        { opt.audio = true; opt.wav = next("--wav"); }
         else if (a == "--wav-rate")   opt.wav_rate = strtoul(next("--wav-rate"), nullptr, 0);
         else if (a == "--scsi-nocache") opt.scsi_cache = false;
@@ -586,6 +592,7 @@ int main(int argc, char **argv)
     top->scsi_cache_bypass = opt.scsi_cache ? 0 : 1;
     top->audio_en    = opt.audio ? 1 : 0;
     top->ipf_en      = opt.ipf ? 1 : 0;
+    top->dpf_en      = opt.dpf ? 1 : 0;
     top->rxdb        = 1;                 // idle mark; nothing types at the console here
     top->ps2_key     = 0;
     top->ps2_mouse   = 0;
@@ -921,6 +928,13 @@ int main(int argc, char **argv)
             exc_bad     = top->dbg_exc_bad;
         }
 
+        if (opt.cmdlog && top->cmdlog_stb) {
+            const uint64_t e = top->cmdlog;
+            printf("cmdlog: op %02x target %u len %u lba %u (cycle %llu)\n",
+                   (unsigned)(e >> 56), (unsigned)((e >> 48) & 7), (unsigned)((e >> 32) & 0xFFFF),
+                   (unsigned)(e & 0xFFFFFFFFu), (unsigned long long)cycle);
+        }
+
         if (itrace_f && ((top->ifetch >> 32) & 1)) {
             uint32_t line = static_cast<uint32_t>(top->ifetch & 0xFFFFFFFFull) >> 5;
             itrace_access++;
@@ -1124,6 +1138,9 @@ int main(int argc, char **argv)
         printf("perf: instruction fills answered from the prefetch buffer %llu, "
                "fills that fetched the next two lines %llu%s\n",
                hi(top->perf11), lo(top->perf11), opt.ipf ? "" : " (--no-ipf)");
+        printf("perf: data fills answered from the data buffer %llu, "
+               "stream fills that fetched the next two lines %llu%s\n",
+               hi(top->perf12), lo(top->perf12), opt.dpf ? "" : " (--no-dpf)");
     }
 
     if (opt.audio) {

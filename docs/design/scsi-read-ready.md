@@ -118,3 +118,33 @@ transfer). The bench: 26 checks and 4,000 random stop/FLUSH/go sequences, 7
 failures before, 0 after. In IRIX's own flow many WD33C93 accesses sit between
 a stop and the next go, so these windows are narrow; this is a hazard
 removed, not yet a proven cause of the stray write.
+
+## The stray write, and the command log (build 47)
+
+Build 46's first diskcheck (2026-09-27) caught the stray write again, on the
+same file as build 41's: `/usr/lib/libX11.so.1`. IRIX's `sum` of it (41170 /
+63140) is the true file's (md5 `9c609b2d...`, from a local copy of the same
+IRIX image), and the image's copy after the session was not (md5
+`6accfa41...`): X loads libX11 at startup, IRIX's checksum came from its page
+cache, and the file's blocks on the disk changed after that. `diskstress`
+right after it (16 synced `/unix` copies, the whole image block-diffed
+against pristine) was clean, as was a second diskcheck.
+
+Two instruments came out of it:
+
+* `verilator/tb_scsi_cache_big.sv` - the block cache over a whole disk with
+  every sector carrying its LBA and write generation, so the device side
+  checks each sector written to it lands at its own LBA. 3 x 150,000 random
+  operations across 2 GB with the bypass toggled: no stray, torn or stale
+  sector. The write-behind cache is not the stray writer in anything this
+  drives.
+* **The SCSI command log** (build 47): every command a target takes -
+  opcode, target, transfer length, LBA - goes into a 16,384-entry ring at ARM
+  `0x35810000`, written through the beacon's port and kept until the core is
+  reloaded (beacon word 49 has the ring position and the count).
+  `tools/misterdeploy/scsilog.py --file IMG PATH` lists every command that
+  touched a file's blocks and says whether any was a WRITE. That splits the
+  causes: a logged WRITE to libX11's blocks means IRIX asked for it (the
+  filesystem, or guest memory it trusted); none means the data changed below
+  the SCSI command. `diskcheck.sh` now keeps the used image and its `efsdiff`
+  on a failure, and runs the log query for each changed file.

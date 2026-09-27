@@ -404,3 +404,28 @@ snoop sees. What differs is the cost of a useless prefetch: random-access
 code (bzip2) would pay eight port clocks per miss for nothing, so a data
 prefetch wants to follow a stream (the miss is at the previous miss + 1)
 rather than fire on every miss.
+
+## 9. Build 47: the data side, on a stream
+
+`ram_arb` has a second two-line buffer for data line fills (`r4300_bus`
+`bus_dfill`, mem_size "100"), filled and snooped exactly like the instruction
+buffer - with one difference. A data fill bursts only when its line is the one
+after the previous data fill's (`d_next`), so a stream's first miss is a plain
+four-word fill, its second fetches the next two lines, and those two are then
+answered from the buffer; a data miss off any stream costs what it always did.
+On the boot's data trace that keeps 57.5 % of the data fills away from DDR3
+(42.5 % left, against 40.9 % if every data miss burst) while never spending
+the port's eight extra clocks on a lone miss.
+
+The buffers are independent (an instruction fill looks only in the instruction
+buffer, a data fill only in the data one), share the port's one 12-word
+transaction, and are both invalidated by the same snoop. Hidden `status[22]`
+(`setopt.sh dpf=off`, simulator `--no-dpf`) turns the data buffer off; beacon
+word 48 (version 17) counts its hits and stream fills and `bcnread.py --perf`
+appends them.
+
+`tb_ipf` grew a directed stream test (first miss plain, second bursts, the
+next two hit, the burst resumes at the line after, a jump does not burst, the
+instruction buffer keeps its lines) and data streams in the random mix: 23
+checks, and in 60,000 transactions under CPU stores and DMA writes 2,230 data
+fills answered from the buffer, 0 wrong words.
