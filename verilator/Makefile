@@ -200,6 +200,18 @@ tb_hpc3:
 	   tb_hpc3.sv $(HPC3) $(RTL)/sgi/hpc3_scsi_dma.sv $(RTL)/sgi/hal2.sv $(RTL)/sgi/hpc3_pbus_dma.sv
 	./obj_dir_tbhpc3/tb_hpc3
 
+# --- the SCSI DMA engine alone, against a memory that answers late --------
+# ram_arb's grant and a DDR3 round trip hold the engine's request for tens of
+# clocks on the board; sim_ram.v answers in one or two. The bench sets both
+# delays and drives stop/FLUSH/go into the windows they open.
+#   make -C verilator tb_scsidma
+#   make -C verilator tb_scsidma SDMA=/tmp/hpc3_scsi_dma_old.sv   (another version of it)
+SDMA ?= $(RTL)/sgi/hpc3_scsi_dma.sv
+tb_scsidma:
+	$V --binary --timing $(TBC_W) --top-module tb_scsidma --Mdir ./obj_dir_tbsdma -o tb_scsidma \
+	   tb_scsidma.sv $(SDMA)
+	./obj_dir_tbsdma/tb_scsidma
+
 
 # The bench in the shape sgi_scsi.sv instantiates since build 27: the CD slot
 # cached with a 64-sector window and multi-block on (CACHE_CD = 1, SECT2 = 64,
