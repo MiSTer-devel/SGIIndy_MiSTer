@@ -70,4 +70,21 @@ then with the defaults, which must be clean with zero forced captures.
 
 ## Results
 
-(To be filled in from the board.)
+Build 45b (commit 6fd7ffc, rbf md5 `64cdbdc3f39bbf900b545906c66936b8`), board .92,
+2026-09-27, each arm from the pristine image with the IRIX CD at ID6:
+
+| arm | `din:` over the boot and the copy | the copy |
+|---|---|---|
+| `dinstrict=off` (build 44's capture) | 0 waited, **2 captures while not ready**, 0 forced | **1 byte differs**, +0x0ae47fc = byte **508** of its 512-byte block (`06004400`, disc `21004400`) |
+| defaults (guard on) | 6 clocks waited, 0 not ready, 0 forced | identical, md5 `32841042d879fcb36a22d21eb6794b8f` |
+
+The control reproduces the fault at the block offset the build 44 install hit,
+with the counter saying why; the guard removes it. Over each boot's ~41 MB of
+disk reads the guard never had to wait - the window is the CD target's, where a
+2048-byte logical block is four host blocks behind one look-ahead.
+
+Two harness faults cost the first A/B and are fixed in the scripts: Software
+Manager opens after a root login when the CD is in the drive and took the typed
+commands (`scripts/desktop.sh` quits it), and `efsread.py` does not follow
+`/usr/tmp`'s symlink (the copy now goes to `/var/tmp`). Evidence:
+`tests/out/hw/b45b-2/`, `tests/out/hw/b45b-3/`.
