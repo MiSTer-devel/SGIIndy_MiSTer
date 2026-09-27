@@ -220,6 +220,15 @@ tb_ipf:
 	$V --binary --timing $(TBC_W) --top-module tb_ipf --Mdir ./obj_dir_tbipf -o tb_ipf 	   tb_ipf.sv $(RTL)/sgi/ram_arb.sv
 	./obj_dir_tbipf/tb_ipf
 
+# --- the SCSI block cache over a whole disk, every sector self-describing -------
+# Each sector carries its LBA and write generation, so the device checks that
+# a flushed sector lands at its own LBA; LBAs span 2 GB (tb_scsi_cache folds
+# them into 128 sectors a slot). Written after build 46's stray write.
+#   make -C verilator tb_scsi_cache_big
+tb_scsi_cache_big:
+	$V --binary --timing $(TBC_W) +define+SIMULATION=1 +define+VERILATOR=1 +incdir+$(RTL)/scsi 	   --top-module tb_scsi_cache_big --Mdir ./obj_dir_tbcbig -o tb_scsi_cache_big 	   tb_scsi_cache_big.sv $(RTL)/scsi/scsi_cache.sv
+	./obj_dir_tbcbig/tb_scsi_cache_big
+
 # --- sgi_memmap against a reference copy of itself ---------------------------
 # The reference is an earlier sgi_memmap.sv with its module renamed
 # sgi_memmap_ref; hit and offset must agree on every input the bench drives.
