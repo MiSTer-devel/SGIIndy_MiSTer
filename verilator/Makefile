@@ -102,6 +102,7 @@ CPUTEST_V = \
 	$(RTL)/sgi/mc_gio_dma.sv \
 	$(RTL)/sgi/sgi_hpc3.sv \
 	$(RTL)/sgi/hal2.sv \
+	$(RTL)/sgi/hpc3_pbus_dma.sv \
 	$(RTL)/sgi/hpc3_scsi_dma.sv \
 	$(RTL)/sgi/sgi_ioc.sv \
 	$(RTL)/sgi/i8042.sv \
@@ -196,7 +197,7 @@ tb_eeprom:
 HPC3 ?= $(RTL)/sgi/sgi_hpc3.sv
 tb_hpc3:
 	$V --binary --timing $(TBC_W) --unroll-count 2048 --unroll-stmts 20000 --top-module tb_hpc3 --Mdir ./obj_dir_tbhpc3 -o tb_hpc3 \
-	   tb_hpc3.sv $(HPC3) $(RTL)/sgi/hpc3_scsi_dma.sv $(RTL)/sgi/hal2.sv
+	   tb_hpc3.sv $(HPC3) $(RTL)/sgi/hpc3_scsi_dma.sv $(RTL)/sgi/hal2.sv $(RTL)/sgi/hpc3_pbus_dma.sv
 	./obj_dir_tbhpc3/tb_hpc3
 
 
@@ -303,6 +304,21 @@ cpuonly: $(RTL)/cpu/generated/r4300_wrap.v
 hal2test:
 	$V -cc --exe --build -j 0 --Mdir ./obj_dir_hal2 --top-module hal2 	   -O3 -CFLAGS "-O2 -std=c++17" $(CPUTEST_W) 	   --x-assign fast --x-initial fast --noassert 	   -o Vhal2 $(RTL)/sgi/hal2.sv tb_hal2.cpp
 	./obj_dir_hal2/Vhal2
+
+# --- the audio path, end to end ---------------------------------------------
+# sgi_hpc3 with its PBUS DMA channels 0-3 and HAL2 (tb_audio_top.sv flattens
+# the beacon ports), driven through its own PIO decode against a C++ memory
+# that answers after a random latency: IRIX's self-linked rings, the PROM's
+# EOX chain on two channels, codec B's silence, odd-word buffers, stop/start,
+# and the OSD's switch. See the header of tb_audio.cpp.
+#   make -C verilator audiotest
+audiotest:
+	$V -cc --exe --build -j 0 --Mdir ./obj_dir_audio --top-module tb_audio_top \
+	   -O3 -CFLAGS "-O2 -std=c++17" $(CPUTEST_W) --unroll-count 2048 \
+	   --x-assign fast --x-initial fast --noassert \
+	   -o Vtb_audio_top tb_audio_top.sv $(RTL)/sgi/sgi_hpc3.sv $(RTL)/sgi/hal2.sv \
+	   $(RTL)/sgi/hpc3_pbus_dma.sv $(RTL)/sgi/hpc3_scsi_dma.sv tb_audio.cpp
+	./obj_dir_audio/Vtb_audio_top
 
 # --- MC GIO64 DMA fill engine unit test ------------------------------------
 # Checks the engine against a C++ transcription of IRIS's own dma_worker loop,

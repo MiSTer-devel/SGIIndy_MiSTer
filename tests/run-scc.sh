@@ -13,7 +13,7 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CROSS="${CROSS:-mipsel-linux-gnu-}"
-SIM="$ROOT/verilator/obj_dir/Vsim_top"
+SIM="${SIM:-$ROOT/verilator/obj_dir/Vsim_top}"
 ELF="$ROOT/tests/scc/build/scctest.elf"
 EXPECT="USCC-TX-OK"
 

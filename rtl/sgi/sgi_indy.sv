@@ -48,7 +48,12 @@ module sgi_indy #(
     // System clocks per count of IOC2's 8254 timer. 50 is the 1 MHz the PROM's
     // calibrate_delay assumes, so one count is one microsecond. Simulation
     // shortens it, which shortens every DELAY() proportionally - see sim_top.sv.
-    parameter int PIT_TICK_DIV = 50
+    parameter int PIT_TICK_DIV = 50,
+    // The clock HAL2 divides its 48 kHz and 44.1 kHz masters out of. The core
+    // clock on hardware; simulation shortens it with PIT_TICK_DIV, so a second
+    // of audio costs the same fraction of a simulated second as a DELAY() does
+    // and the PROM's wait for its startup tune still covers the tune.
+    parameter int AUDIO_CLK_HZ = 50_000_000
 )(
     input  logic        clk,
     input  logic        ce,
@@ -87,6 +92,12 @@ module sgi_indy #(
     // The OSD's "SCSI cache: Off" - every block request passes through the
     // cache untouched, one sector per HPS transaction.
     input  logic        scsi_cache_bypass,
+    // The WD33C93B's DATA IN look-ahead (rtl/scsi/wd33c93.sv): on normally;
+    // off is an instrument for the CD-install corruption hunt.
+    input  logic        scsi_din_lookahead,
+    // The WD33C93B's DATA IN capture waits for the target's buffers to be
+    // current (rtl/scsi/wd33c93.sv din_strict): on normally.
+    input  logic        scsi_din_strict,
 
     // Megabytes of DRAM actually fitted. Drives the MC's bank decode; on
     // hardware this is a constant and folds away.
@@ -147,6 +158,14 @@ module sgi_indy #(
     // Takes CMAP out of the pixel path so the frame buffer's index shows
     // directly. A bring-up instrument; see rtl/newport/newport.sv.
     input  logic        dbg_raw_index,
+
+    // ---- audio -----------------------------------------------------------
+    // The OSD's audio switch: low, HAL2 reports itself absent and the machine
+    // is what it was before it had a sample path (rtl/sgi/hal2.sv). The DAC
+    // is signed 16-bit in the clk domain, changing at the sample rate.
+    input  logic        audio_en,
+    output logic [15:0] audio_l,
+    output logic [15:0] audio_r,
 
     // ---- Newport's frame buffer -----------------------------------------
     // Two ports, because the frame buffer is VRAM: the rasteriser owns the
@@ -250,7 +269,7 @@ module sgi_indy #(
     // the top's beacon writer. Pure observation.
     output logic [63:0] dbg_scsi_bcn [7],
     // SGI: the disk-time counters (docs/design/scsi-block-cache.md), five words from sgi_scsi.
-    output logic [63:0] dbg_scsi_stat [7],
+    output logic [63:0] dbg_scsi_stat [8],
     // The HPC3 SCSI0 DMA channel's live state (docs/29), a separate beacon
     // word - the engine lives in sgi_hpc3, not sgi_scsi.
     output logic [63:0] dbg_hpc3_dma,
@@ -262,7 +281,10 @@ module sgi_indy #(
     // engine's mode/cause/state/beat count; word 1 = the live descriptor
     // addresses {memadr, gio_adr}; word 2 = REX3's beat counters; word 3 =
     // the display-interpretation word (DID + mode entry in use).
-    output logic [63:0] dbg_vdma_bcn [4]
+    output logic [63:0] dbg_vdma_bcn [4],
+    // Audio beacon words: HAL2's frames/ops and under/overruns/peak, and the
+    // PBUS DMA engine's channels, descriptors and words (rtl/sgi/sgi_hpc3.sv).
+    output logic [63:0] dbg_audio_bcn [3]
 );
 
     localparam logic [31:0] RAM_BASE   = 32'h0800_0000;   // low local memory
@@ -706,7 +728,7 @@ module sgi_indy #(
     logic [63:0] hpc3_rdata;
     logic        hpc3_ack;
 
-    sgi_hpc3 u_hpc3 (
+    sgi_hpc3 #(.AUDIO_CLK_HZ(AUDIO_CLK_HZ)) u_hpc3 (
         .clk     (clk),
         .reset   (reset),
         .sel     (bus_req && (bus_addr >= HPC3_BASE)
@@ -738,7 +760,12 @@ module sgi_indy #(
         .scsi_dev_reset  (scsi_dev_reset),
 
         .scsi_dma_irq    (scsi_dma_irq),
-        .dbg_scsi0_dma   (dbg_hpc3_dma)
+        .dbg_scsi0_dma   (dbg_hpc3_dma),
+
+        .audio_en        (audio_en),
+        .audio_l         (audio_l),
+        .audio_r         (audio_r),
+        .dbg_audio       (dbg_audio_bcn)
     );
 
     //------------------------------------------------------------------
@@ -853,6 +880,8 @@ module sgi_indy #(
         .sd_buff_din  (scsi_sd_buff_din),
         .sd_buff_wr   (scsi_sd_buff_wr),
         .cache_bypass (scsi_cache_bypass),
+        .din_lookahead_en (scsi_din_lookahead),
+        .din_strict   (scsi_din_strict),
         .dbg_bcn      (dbg_scsi_bcn),
         .dbg_stat     (dbg_scsi_stat)
     );

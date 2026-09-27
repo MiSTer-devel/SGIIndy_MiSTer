@@ -44,6 +44,7 @@ reference disagree, the reference is current.
 | [HPC3's register file](design/hpc3-register-file.md) | moving HPC3's storage into block RAM |
 | [REX3 rendering](design/rex3-rendering.md) | the graphics engine's full command set, and the bench that checks it against IRIS |
 | [REX3 source audit](design/rex3-source-audit.md) | REX3 against SGI's specs, the guest's own GL libraries, IRIS and MAME, and the plan that followed |
+| [Audio](design/audio.md) | HAL2 and HPC3's PBUS DMA: what the PROM and IRIX's audio driver were read to need, the sample path, and the bench that plays the PROM's startup tune |
 
 ## History
 

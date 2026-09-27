@@ -87,6 +87,21 @@ module wd33c93 #(
     // dout_ahead_read. See din_ahead.
     input  logic [23:0] scsi_din_ahead,
     input  logic        scsi_din_ahead_ok,
+    // The look-ahead's runtime switch (sgiindy.sv status[19], no OSD entry;
+    // scripts/setopt.sh lookahead=off). An instrument: with it low every
+    // DATA IN byte settles on its own, as before build 36, so one bitstream
+    // can say whether a corrupt DATA IN byte came through the look-ahead.
+    input  logic        din_lookahead_en,
+    // scsi.v's dout_ready: the target's byte and its look-ahead are what its
+    // buffers hold for this byte now. din_strict (on normally; setopt.sh
+    // dinstrict=off turns it off, sgiindy.sv status[20]) makes the DATA IN
+    // capture wait for it after the settle; off is build 44's timing alone.
+    input  logic        scsi_din_ready,
+    input  logic        din_strict,
+    // {clocks captures waited for scsi_din_ready, captures made while it was
+    // low, captures forced after the wait's limit}: the CD-install
+    // corruption's instrument (docs/design/scsi-read-ready.md).
+    output logic [63:0] dbg_din,
 
     // ---- HPC3 SCSI DMA channel -------------------------------------------
     // Held, not pulsed: `dma_req` stays up until the engine answers, because
@@ -379,6 +394,10 @@ module wd33c93 #(
     // than to anything specified, and scsi.v is vendored.
     localparam int DIN_SETTLE = 6;
     logic [2:0] din_settle;
+    logic [5:0] din_wait;            // clocks waited for scsi_din_ready this byte
+    logic [31:0] din_wait_cyc;
+    logic [15:0] din_notready, din_forced;
+    assign dbg_din = {din_wait_cyc, din_notready, din_forced};
     // DATA IN BYTES TAKEN FOUR AT A TIME, still acknowledged one at a time.
     // The settle above is scsi.v's prefetch at work: after every advance of its
     // byte counter it borrows the buffer RAM's read port for up to three clocks
@@ -602,6 +621,10 @@ module wd33c93 #(
             sat_paused  <= 1'b0;
             rst_timer   <= 9'd0;
             din_ahead_n <= 2'd0;
+            din_wait    <= 6'd0;
+            din_wait_cyc <= 32'd0;
+            din_notready <= 16'd0;
+            din_forced  <= 16'd0;
             pio_xfer    <= 1'b0;
             pio_done    <= 1'b0;
             pio_sbt     <= 1'b0;
@@ -1454,14 +1477,31 @@ module wd33c93 #(
                 ST_SAT_DIN: begin
                     if (!scsi_req) din_req_held <= 1'b0;
                     if (din_settle != 0) din_settle <= din_settle - 3'd1;
+                    // THE SETTLE IS A COUNT, AND WHAT IT WAITS FOR IS NOT.
+                    // scsi.v's buffers borrow their read port to refill the
+                    // look-ahead after every address change - and again
+                    // whenever the HPS writes an address the look-ahead holds,
+                    // which a sector fill into the next ring slot does at the
+                    // end of this one. While it borrows it, the byte on the
+                    // bus is the NEXT word's. So wait for the buffers to say
+                    // the byte and the look-ahead are current; give up after
+                    // 63 clocks rather than hang, and count both.
+                    else if (din_strict && !scsi_din_ready && din_wait != 6'h3F) begin
+                        din_wait     <= din_wait + 6'd1;
+                        din_wait_cyc <= din_wait_cyc + 32'd1;
+                    end
                     else begin
+                        if (!scsi_din_ready) din_notready <= din_notready + 16'd1;
+                        if (din_wait == 6'h3F) din_forced <= din_forced + 16'd1;
+                        din_wait   <= 6'd0;
                         data_latch <= scsi_din;
                         dma_wdata  <= scsi_din;
                         dma_req    <= 1'b1;
                         state      <= ST_SAT_DMA;
                         din_ahead  <= scsi_din_ahead;
-                        din_ahead_n <= (DIN_LOOKAHEAD && din_req_held && scsi_req &&
-                                        scsi_din_ahead_ok) ? 2'd3 : 2'd0;
+                        din_ahead_n <= (DIN_LOOKAHEAD && din_lookahead_en && din_req_held &&
+                                        scsi_req && scsi_din_ahead_ok &&
+                                        (scsi_din_ready || !din_strict)) ? 2'd3 : 2'd0;
                     end
                 end
 

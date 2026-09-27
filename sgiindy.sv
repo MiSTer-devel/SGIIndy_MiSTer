@@ -58,11 +58,14 @@ assign HDMI_FREEZE = 0;
 assign HDMI_BLACKOUT = 0;
 assign HDMI_BOB_DEINT = 0;
 
-// No audio path. HAL2 answers its revision register and nothing else - this
-// core reports an audio processor rather than having one.
-assign AUDIO_S = 0;
-assign AUDIO_L = 0;
-assign AUDIO_R = 0;
+// HAL2's DAC (rtl/sgi/hal2.sv): signed 16-bit, changing at the sample rate
+// in clk_sys. audio_out.sv samples it in the audio clock domain and only takes
+// a value that has held for two of its clocks, which is what makes driving it
+// from another clock safe for a signal this slow.
+wire [15:0] hal2_l, hal2_r;
+assign AUDIO_S = 1;
+assign AUDIO_L = hal2_l;
+assign AUDIO_R = hal2_r;
 assign AUDIO_MIX = 0;
 
 assign BUTTONS = 0;
@@ -127,6 +130,11 @@ localparam CONF_STR = {
 	// 26 - the control for measuring the cache on one bitstream, and the
 	// way out if it ever misbehaves. scripts/setopt.sh knows it as scsicache.
 	"O[17],SCSI cache,On,Off;",
+	// THE AUDIO SWITCH (rtl/sgi/hal2.sv). Off makes HAL2 report itself absent,
+	// so the PROM plays no tune and IRIX never loads its audio driver - the
+	// machine as it was before there was a sample path. Takes effect at the
+	// next reset.
+	"O[18],Audio,On,Off;",
 	"-;",
 	"O[122:121],Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
 	"-;",
@@ -470,11 +478,12 @@ wire        txda, txdb;
 
 // SCSI debug beacon words out of the core (docs/28), to the writer below.
 wire [63:0] scsi_bcn [7];
-wire [63:0] scsi_stat [7];  // the disk-time counters (docs/design/scsi-block-cache.md; 5-6 ver 14, docs/design/scsi-sync-negotiation.md)
+wire [63:0] scsi_stat [8];  // the disk-time counters (docs/design/scsi-block-cache.md; 5-6 ver 14, docs/design/scsi-sync-negotiation.md)
 wire [63:0] hpc3_dma_bcn;   // HPC3 SCSI0 DMA channel state (docs/29)
 wire [63:0] int_bcn [2];    // interrupt-delivery diagnostics (docs/29)
 wire [63:0] vdma_bcn [4];   // VDMA / Newport pixel-DMA diagnostics (docs/design/newport-vdma.md)
 wire [63:0] perf_bcn [11];  // CPU performance counters (docs/design/cpu-speed-tlb-icache.md; w9 build 37; w10 ver 13)
+wire [63:0] audio_bcn [3];  // HAL2 and the PBUS DMA engine (docs/design/audio.md; ver 15)
 
 sgi_indy u_core
 (
@@ -490,6 +499,10 @@ sgi_indy u_core
 
 	.mem_mb           (mem_mb),
 	.dbg_raw_index    (status[14]),
+
+	.audio_en         (~status[18]),
+	.audio_l          (hal2_l),
+	.audio_r          (hal2_r),
 
 	.ram_req          (ram_req),
 	.ram_we           (ram_we),
@@ -576,6 +589,12 @@ sgi_indy u_core
 	.scsi_sd_buff_din (scsi_sd_buff_din),
 	.scsi_sd_buff_wr  (sd_buff_wr),
 	.scsi_cache_bypass(status[17]),
+	// status[19] has no OSD entry: scripts/setopt.sh lookahead=off sets it.
+	// The WD33C93B's DATA IN look-ahead, as an instrument (rtl/scsi/wd33c93.sv).
+	.scsi_din_lookahead(~status[19]),
+	// status[20], no OSD entry either: setopt.sh dinstrict=off is build 44's
+	// DATA IN capture timing, for the A/B (docs/design/scsi-read-ready.md).
+	.scsi_din_strict  (~status[20]),
 
 	.dbg_scsi_bcn     (scsi_bcn),
 	.dbg_scsi_stat    (scsi_stat),
@@ -583,6 +602,7 @@ sgi_indy u_core
 	.dbg_int_bcn      (int_bcn),
 	.dbg_vdma_bcn     (vdma_bcn),
 	.dbg_perf_bcn     (perf_bcn),
+	.dbg_audio_bcn    (audio_bcn),
 
 	// Debug taps: the console byte tap and the bus mirror. They exist for the
 	// simulation harness and nothing on hardware reads them. (Do not start a
@@ -846,7 +866,14 @@ ddr3_mux u_mem
 // ver=14 (build 40) adds words 41-42: DATA-phase clocks split by whose turn it
 // is - {DATA IN waiting on the initiator /64, DATA IN waiting on the target /64}
 // and the same for DATA OUT (sgi_scsi dbg_stat 5-6, docs/design/scsi-sync-negotiation.md).
-localparam int BCN_WORDS = 43;
+// ver=15 (audio) adds words 43-45: HAL2's {codec A frames played, DMA ops},
+// {underruns, overruns, peak |sample|, last left sample}, and the PBUS DMA
+// engine's {running channels, interrupts, descriptors fetched, words moved}
+// (rtl/sgi/hal2.sv, rtl/sgi/sgi_hpc3.sv; bcnread.py --audio).
+// Word 46 (ver 15 too): the WD33C93B's DATA IN capture guard - {clocks
+// captures waited for the target's buffers, captures made while they were not
+// ready, captures forced after the wait's limit} (wd33c93.sv dbg_din).
+localparam int BCN_WORDS = 47;
 
 // ---- DDR3 port performance counters (docs/design/cpu-speed-tlb-icache.md) ------------------------------
 // WHO HAS THE ONE PORT, AND WHO IS WAITING FOR IT. Everything the machine
@@ -906,7 +933,7 @@ reg  [31:0] bcn_addr;
 reg  [63:0] bcn_wdata;
 
 wire [63:0] bcn_src [BCN_WORDS];
-assign bcn_src[0] = { 16'hBEC0, 8'h0E, 8'h00, bcn_beat };
+assign bcn_src[0] = { 16'hBEC0, 8'h0F, 8'h00, bcn_beat };
 assign bcn_src[1] = scsi_bcn[0];
 assign bcn_src[2] = scsi_bcn[1];
 assign bcn_src[3] = scsi_bcn[2];
@@ -949,6 +976,10 @@ assign bcn_src[39] = perf_bcn[9];
 assign bcn_src[40] = perf_bcn[10];
 assign bcn_src[41] = scsi_stat[5];
 assign bcn_src[42] = scsi_stat[6];
+assign bcn_src[43] = audio_bcn[0];
+assign bcn_src[44] = audio_bcn[1];
+assign bcn_src[45] = audio_bcn[2];
+assign bcn_src[46] = scsi_stat[7];
 
 always @(posedge clk_sys) begin
 	if (~pll_locked) begin

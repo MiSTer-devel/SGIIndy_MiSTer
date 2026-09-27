@@ -43,7 +43,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SIM="$ROOT/verilator/obj_dir/Vsim_top"
+SIM="${SIM:-$ROOT/verilator/obj_dir/Vsim_top}"
 PROM="${PROM:-$ROOT/roms/IP24_Indy/ip24prom.070-9101-011.bin}"
 DISK="${DISK:-$ROOT/tests/disks/blank8m.img}"
 ISO="$ROOT/tests/out/patterned8m.iso"

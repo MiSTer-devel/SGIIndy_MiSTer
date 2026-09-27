@@ -41,18 +41,20 @@ public:
     ~Dut() { delete t; }
     void tick() { t->clk = 0; t->eval(); t->clk = 1; t->eval(); }
     void reset() {
+        t->present = 1; t->win = 0; t->wsel = 0;
+        t->x_ack = 0; t->x_ok = 0; t->x_rdata = 0;
         t->reset = 1; t->sel = 0; t->we = 0;
         for (int i = 0; i < 3; i++) tick();
         t->reset = 0; tick();
     }
     void wr(int reg, uint16_t v) {
-        t->sel = 1; t->we = 1; t->regsel = reg; t->wdata = v;
+        t->sel = 1; t->we = 1; t->dsel = reg << 1; t->wdata = v;
         tick();
         t->sel = 0; t->we = 0;
     }
     uint16_t rd(int reg) {
-        t->sel = 1; t->we = 0; t->regsel = reg; t->eval();
-        uint16_t v = t->rdata;
+        t->sel = 1; t->we = 0; t->dsel = reg << 1; t->eval();
+        uint16_t v = t->rdata0;
         t->sel = 0;
         return v;
     }
@@ -98,6 +100,7 @@ int main(int argc, char **argv)
     check("ISR writable bits 4:2 read back", (d.rd(R_ISR) >> 2) & 7, 7);
     d.wr(R_ISR, 0x0000);
     check("ISR writable bits clear again", (d.rd(R_ISR) >> 2) & 7, 0);
+    d.wr(R_ISR, 0x0018);                  // out of reset for the rest
 
     d.wr(R_IDR0, 0x1234);
     check("IDR0 reads back", d.rd(R_IDR0), 0x1234);
@@ -113,8 +116,7 @@ int main(int argc, char **argv)
         snprintf(n, sizeof n, "bres%d sel reset value", clk);   check(n, a, 0x0001);
         d.ind_rd(T_BRES, clk, 2, a, b);
         snprintf(n, sizeof n, "bres%d inc reset value", clk);   check(n, a, 0x0001);
-        d.ind_rd(T_BRES, clk, 3, a, b);
-        snprintf(n, sizeof n, "bres%d modctrl reset value", clk); check(n, a, 0xFFFF);
+        snprintf(n, sizeof n, "bres%d modctrl reset value", clk); check(n, b, 0xFFFF);
     }
 
     // Global DMA: four single-word parameters.
@@ -153,18 +155,16 @@ int main(int argc, char **argv)
     // Bresenham clocks: three parameters on each of three generators, and each
     // generator has to be independent of the others.
     for (int clk = 1; clk <= 3; clk++) {
-        for (int p = 1; p <= 3; p++) {
-            uint16_t v = (uint16_t)(0x4000 | (clk << 8) | p);
-            d.ind_wr(T_BRES, clk, p, v);
-        }
+        d.ind_wr(T_BRES, clk, 1, (uint16_t)(0x4100 | clk));
+        d.ind_wr(T_BRES, clk, 2, (uint16_t)(0x4200 | clk), (uint16_t)(0x4300 | clk));
     }
     for (int clk = 1; clk <= 3; clk++) {
-        for (int p = 1; p <= 3; p++) {
-            uint16_t v = (uint16_t)(0x4000 | (clk << 8) | p);
-            d.ind_rd(T_BRES, clk, p, a, b);
-            char n[64]; snprintf(n, sizeof n, "bres%d param%d independent", clk, p);
-            check(n, a, v);
-        }
+        char n[64];
+        d.ind_rd(T_BRES, clk, 1, a, b);
+        snprintf(n, sizeof n, "bres%d sel independent", clk);     check(n, a, 0x4100 | clk);
+        d.ind_rd(T_BRES, clk, 2, a, b);
+        snprintf(n, sizeof n, "bres%d inc independent", clk);     check(n, a, 0x4200 | clk);
+        snprintf(n, sizeof n, "bres%d modctrl independent", clk); check(n, b, 0x4300 | clk);
     }
 
     // A number the chip does not implement must not alias onto one it does.

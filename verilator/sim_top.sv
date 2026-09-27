@@ -33,6 +33,13 @@ module sim_top
     // The SCSI block cache's OSD bypass (docs/design/scsi-block-cache.md): --scsi-nocache sets it,
     // and a run with it on is the pre-build-26 block path, sector by sector.
     input  wire        scsi_cache_bypass,
+    // The OSD's audio switch. Off by default in the harness (--audio sets it):
+    // with it on the PROM plays its startup tune, which costs every PROM
+    // regression millions of cycles of DMA it is not there to test.
+    input  wire        audio_en,
+    output wire [15:0] audio_l,
+    output wire [15:0] audio_r,
+    output wire [63:0] audio0, audio1, audio2,
 
     // Serial receive for the console channel. Idle mark is 1; the GUI harness
     // shifts typed characters out on it so the Command Monitor can be driven.
@@ -176,7 +183,15 @@ module sim_top
         assign scsi_sd_buff_din[16*k +: 16] = scsi_sd_buff_din_arr[k];
     end
 
-    sgi_indy #(.MEM_MB(64), .RTC_TICK_DIV(5000), .PIT_TICK_DIV(5)) u_core
+    // AUDIO_CLK_HZ: a tenth of the core clock, like PIT_TICK_DIV, so the
+    // machine's sample rate agrees with its microsecond.
+    wire [63:0] audio_bcn [3];
+    assign audio0 = audio_bcn[0];
+    assign audio1 = audio_bcn[1];
+    assign audio2 = audio_bcn[2];
+
+    sgi_indy #(.MEM_MB(64), .RTC_TICK_DIV(5000), .PIT_TICK_DIV(5),
+               .AUDIO_CLK_HZ(5_000_000)) u_core
     (
         .clk           (clk),
         .ce            (1'b1),
@@ -186,6 +201,8 @@ module sim_top
         .icache_en     (icache_en),
         .dcache_en     (dcache_en),
         .scsi_cache_bypass(scsi_cache_bypass),
+        .scsi_din_lookahead(1'b1),
+        .scsi_din_strict(1'b1),
 
         .ps2_key       (ps2_key),
         .ps2_mouse     (ps2_mouse),
@@ -239,6 +256,10 @@ module sim_top
         // to run and can be compared against a control.
         .host_rtc      (65'd0),
         .dbg_raw_index (1'b0),   // --fbindex does this in C++, on the dump
+        .audio_en      (audio_en),
+        .audio_l       (audio_l),
+        .audio_r       (audio_r),
+        .dbg_audio_bcn (audio_bcn),
 
         .fbw_req       (fbw_req),
         .fbw_we        (fbw_we),

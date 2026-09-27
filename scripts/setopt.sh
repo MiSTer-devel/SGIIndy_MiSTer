@@ -21,6 +21,12 @@
 #   uartdbg=off|sys|ser  O[16:15]  0x55 test pattern from clk_sys or sclk
 #   scsicache=on|off     O[17]     the SCSI block cache (docs/design/scsi-block-cache.md); off = every
 #                                  block request one HPS transaction, as before
+#   audio=on|off         O[18]     HAL2 and the sample path (docs/design/audio.md); off =
+#                                  HAL2 reports itself absent, as before
+#   lookahead=on|off     status[19], no OSD entry: the WD33C93B's DATA IN
+#                                  look-ahead (rtl/scsi/wd33c93.sv), an instrument
+#   dinstrict=on|off     status[20], no OSD entry: the DATA IN capture waits for
+#                                  scsi.v's buffers to be current; off = build 44
 #
 # Usage: bash scripts/setopt.sh gfx=none uartdbg=ser
 #        bash scripts/setopt.sh            # all defaults
@@ -43,6 +49,11 @@ FIELDS = {                       # name: (low bit, width, {value: code})
     "viddbg":  (14, 1, {"off": 0, "raw": 1}),
     "uartdbg": (15, 2, {"off": 0, "sys": 1, "ser": 2}),
     "scsicache": (17, 1, {"on": 0, "off": 1}),
+    "audio":   (18, 1, {"on": 0, "off": 1}),
+    # No OSD entry: the WD33C93B's DATA IN look-ahead, an instrument.
+    "lookahead": (19, 1, {"on": 0, "off": 1}),
+    # No OSD entry: the DATA IN capture waits for the target's buffers.
+    "dinstrict": (20, 1, {"on": 0, "off": 1}),
 }
 st = 0
 for arg in sys.argv[1:]:

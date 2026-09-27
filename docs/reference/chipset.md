@@ -34,9 +34,10 @@ build is nearly always the address at the top of a poll loop.
 | `rtl/sgi/eeprom_93c56.sv` | The R4000 configuration EEPROM behind `MC + 0x30` |
 | `rtl/sgi/sgi_memmap.sv` | Turns `MEMCFG0/1` into "is this address in a valid bank, and where in RAM is it" |
 | `rtl/sgi/ram_arb.sv` | The one arbiter: the CPU and the DMA masters on main memory's single port |
-| `rtl/sgi/sgi_hpc3.sv` | HPC3's register file and decode. Every channel but one is storage, held in two M10Ks |
-| `rtl/sgi/hpc3_scsi_dma.sv` | HPC3's SCSI channel 0 — the one real DMA channel |
-| `rtl/sgi/hal2.sv` | HAL2's register file, inside HPC3's window. It reports no audio present; see below |
+| `rtl/sgi/sgi_hpc3.sv` | HPC3's register file and decode, and the arbiter on its one memory port. The channels without an engine are storage, held in two M10Ks |
+| `rtl/sgi/hpc3_scsi_dma.sv` | HPC3's SCSI channel 0 |
+| `rtl/sgi/hpc3_pbus_dma.sv` | HPC3's PBUS DMA channels 0-3, the audio channels ([audio.md](../design/audio.md)) |
+| `rtl/sgi/hal2.sv` | HAL2, the audio processor: its registers, three sample clocks, four DMA ports and the DAC's output stage. The OSD's **Audio: Off** makes it report itself absent |
 | `rtl/sgi/sgi_ioc.sv` | IOC2: `SYS_ID`, panel, reset, and the INT2 interrupt controller |
 | `rtl/sgi/pit8254.sv` | The 8254 inside IOC2 |
 | `rtl/sgi/i8042.sv` | The PC keyboard/mouse controller at IOC2 `+0x40`/`+0x44`, and both devices behind it |
@@ -73,20 +74,20 @@ useful thing in this document for anyone bringing up a machine like this one:
 - **No Ethernet.** The SEEQ 8003's registers are unclaimed and HPC3's
   Ethernet DMA channels are plain storage, so nothing moves a packet. The PROM
   boots without it; IRIX attaches `ec0` and logs `ec0: no carrier`.
-- **Audio is reported absent.** `hal2.sv` holds HAL2's direct and indirect
-  registers, but `HAL2_REV` reads `0xC010` — bit 15 set, "no audio present" —
-  so the PROM skips its HAL2 initialisation, `hinv` lists no audio device, and
-  IRIX never loads its `kdsp_a2` audio driver. That is deliberate: with the
-  bit clear, IRIX loaded the driver, which ran against a HAL2 with no DMA
-  channel and no sample path behind it and froze the desktop the first time
-  anything played a sound
-  ([scsi-fit-and-framebuffer-layout.md](../design/scsi-fit-and-framebuffer-layout.md)).
-  `sgiindy.sv` ties the MiSTer's audio outputs to zero.
+- **Audio is output only.** HAL2 plays codec A through HPC3's PBUS DMA
+  channels to the MiSTer's audio output; codec B and the AES input record
+  silence, and the AES output is read and dropped, so the software driving them
+  sees its rings advance ([audio.md](../design/audio.md)). The PBUS DMA
+  interrupt is not wired to INT2 - nothing an Indy runs was found to use it.
+  With the OSD's **Audio: Off**, `HAL2_REV` reads `0xC010` — bit 15 set, "no
+  audio present" — so the PROM skips its HAL2 initialisation and its tune,
+  `hinv` lists no audio device, and IRIX never loads `kdsp_a2`.
 - **One SCSI controller.** Controller 0 is real; controller 1's window at
   `0x1FBC8000` is unclaimed, and the PROM reports it absent and carries on, as
   it does for a machine with one SCSI bus.
-- **Every HPC3 channel but SCSI 0 is storage.** The PBUS DMA channels, SCSI
-  channel 1 and the Ethernet channels read back what was written and move no
+- **Every HPC3 channel but SCSI 0 and PBUS 0-3 is storage.** PBUS DMA
+  channels 4-7, SCSI channel 1 and the Ethernet channels read back what was
+  written and move no
   data — enough for the PROM's register tests, one of which walks a bit through
   `0x1FB94000`, and honest about the rest.
   [hpc3-register-file.md](../design/hpc3-register-file.md) is how those

@@ -206,6 +206,10 @@ struct Options {
     // The SCSI block cache (docs/design/scsi-block-cache.md); --scsi-nocache clears it and every
     // block request becomes one HPS transaction, the pre-build-26 path.
     bool        scsi_cache = true;
+    // The audio switch, and where --wav writes the DAC's output.
+    bool        audio = false;
+    std::string wav;
+    uint32_t    wav_rate = 44100;
     // Which cpu_error bits abort the run. See kErrorNames: only the two that
     // mean the core itself is wedged are fatal by default.
     uint32_t fatal_errors = (1u << 1) | (1u << 4);   // stall, fifo
@@ -331,6 +335,11 @@ static void usage()
         "  --pc-count N      how many PCs to print (default 2000)\n"
         "  --scsi-nocache    bypass the SCSI block cache (docs/design/scsi-block-cache.md): every block\n"
         "                    request is one HPS transaction, as before build 26\n"
+        "  --audio           fit the audio (HAL2 reports itself present); the\n"
+        "                    PROM then plays its startup tune\n"
+        "  --wav FILE        implies --audio: write the DAC's output as a 16-bit\n"
+        "                    stereo WAV, sampled at --wav-rate (default 44100)\n"
+        "  --wav-rate N      the rate --wav samples the DAC at\n"
         "  --no-gfx          leave Newport unfitted, which keeps the PROM's\n"
         "                    console on the serial port\n"
         "  --key-at N STR    press STR at the keyboard once cycle N is reached.\n"
@@ -427,6 +436,9 @@ int main(int argc, char **argv)
                                         opt.pc_from = strtoull(next("--pc-from"), nullptr, 0); }
         else if (a == "--pc-count")   opt.pc_count = strtoull(next("--pc-count"), nullptr, 0);
         else if (a == "--no-gfx")     opt.gfx = false;
+        else if (a == "--audio")      opt.audio = true;
+        else if (a == "--wav")        { opt.audio = true; opt.wav = next("--wav"); }
+        else if (a == "--wav-rate")   opt.wav_rate = strtoul(next("--wav-rate"), nullptr, 0);
         else if (a == "--scsi-nocache") opt.scsi_cache = false;
         else if (a == "--watch")       opt.watch.push_back(
                  static_cast<uint32_t>(strtoul(next("--watch"), nullptr, 16)) & ~7u);
@@ -569,6 +581,7 @@ int main(int argc, char **argv)
     top->icache_en   = opt.icache ? 1 : 0;
     top->dcache_en   = opt.dcache ? 1 : 0;
     top->scsi_cache_bypass = opt.scsi_cache ? 0 : 1;
+    top->audio_en    = opt.audio ? 1 : 0;
     top->rxdb        = 1;                 // idle mark; nothing types at the console here
     top->ps2_key     = 0;
     top->ps2_mouse   = 0;
@@ -667,6 +680,14 @@ int main(int argc, char **argv)
 
     auto tick = [&](int v) { top->clk = v; top->eval(); };
 
+    // --wav: the DAC sampled at a fixed rate of the machine's audio clock,
+    // which sim_top runs at 5 MHz (AUDIO_CLK_HZ). Sampling at the rate HAL2's
+    // own generator runs at, half a period out of phase with it, takes every
+    // sample it plays exactly once.
+    static const uint64_t kAudioClk = 5000000;
+    std::vector<int16_t> wav;
+    uint64_t wav_acc = kAudioClk / 2;
+
     for (; cycle < opt.max_cycles; cycle++) {
         if (cycle == 8) top->reset = 0;
 
@@ -688,6 +709,15 @@ int main(int argc, char **argv)
         top->rxdb = utx.line;
         ps2.step(top, cycle);
         scsi_dev.step(top);
+
+        if (!opt.wav.empty()) {
+            wav_acc += opt.wav_rate;
+            if (wav_acc >= kAudioClk) {
+                wav_acc -= kAudioClk;
+                wav.push_back(static_cast<int16_t>(top->audio_l));
+                wav.push_back(static_cast<int16_t>(top->audio_r));
+            }
+        }
 
         // Key batches with a cycle trigger, for the graphics console.
         if (key_at_n < opt.keys_at.size() && cycle >= opt.keys_at[key_at_n].first
@@ -1087,6 +1117,36 @@ int main(int argc, char **argv)
         printf("perf: I-cache refills after an instruction TLB walk %llu, "
                "fill requests answered from the cache %llu\n",
                hi(top->perf8), lo(top->perf8));
+    }
+
+    if (opt.audio) {
+        auto hi = [](uint64_t w) { return static_cast<unsigned long long>(w >> 32); };
+        auto lo = [](uint64_t w) { return static_cast<unsigned long long>(w & 0xFFFFFFFFull); };
+        printf("audio: codec A frames %llu, DMA ops %llu, underruns %llu, overruns %llu, "
+               "peak %llu; PBUS running 0x%llx, descriptors %llu, words %llu\n",
+               hi(top->audio0), lo(top->audio0),
+               (unsigned long long)(top->audio1 >> 48),
+               (unsigned long long)((top->audio1 >> 32) & 0xFFFF),
+               (unsigned long long)((top->audio1 >> 16) & 0xFFFF),
+               (unsigned long long)(top->audio2 >> 60),
+               (unsigned long long)((top->audio2 >> 32) & 0xFFFF),
+               lo(top->audio2));
+    }
+    if (!opt.wav.empty()) {
+        FILE *wf = fopen(opt.wav.c_str(), "wb");
+        if (!wf) fprintf(stderr, "cannot write %s\n", opt.wav.c_str());
+        else {
+            auto u32 = [&](uint32_t v) { fwrite(&v, 4, 1, wf); };
+            auto u16 = [&](uint16_t v) { fwrite(&v, 2, 1, wf); };
+            uint32_t bytes = static_cast<uint32_t>(wav.size() * 2);
+            fwrite("RIFF", 1, 4, wf); u32(36 + bytes); fwrite("WAVEfmt ", 1, 8, wf);
+            u32(16); u16(1); u16(2); u32(opt.wav_rate); u32(opt.wav_rate * 4);
+            u16(4); u16(16); fwrite("data", 1, 4, wf); u32(bytes);
+            fwrite(wav.data(), 2, wav.size(), wf);
+            fclose(wf);
+            printf("wav: %zu frames at %u Hz to %s\n", wav.size() / 2, opt.wav_rate,
+                   opt.wav.c_str());
+        }
     }
 
     if (!g_dev.testdev.out.empty())

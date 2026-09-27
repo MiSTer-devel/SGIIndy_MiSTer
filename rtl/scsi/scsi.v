@@ -35,6 +35,11 @@ module scsi
 	// READ's data now. See the assign beside dout_pair_next.
 	output [23:0] dout_ahead_read,
 	output        dout_ahead_ok,
+	// SGI LOCAL CHANGE: dout AND dout_ahead_read are what the buffers hold at
+	// data_cnt now - the byte being sent is not a stolen look-ahead read and
+	// the look-ahead registers are current. 1 for every source but a READ's
+	// buffers. See rd_ready in scsi_dpram.
+	output        dout_ready,
 
 	// CD audio PCM (CDROM targets only; zeros on disks). Mixed at the top.
 	output signed [15:0] cd_snd_l,
@@ -215,6 +220,7 @@ wire [BUF_AW-1:0] hps_addr = cmd_write ? hps_addr_wr : { rd_hps_slot, sd_buff_ad
 wire [BUF_AW-1:0] mac_addr = (phase == PHASE_DATA_IN) ? mac_addr_wr : data_cnt[BUF_AW:1];
 
 wire [7:0] buffer0_dout;
+wire buffer0_ready, buffer1_ready;   // SGI: see scsi_dpram rd_ready
 wire [7:0] buffer0_dout_next;
 wire [7:0] buffer0_dout_next2;
 scsi_dpram #(.ADDRWIDTH(BUF_AW)) buffer0
@@ -235,7 +241,8 @@ scsi_dpram #(.ADDRWIDTH(BUF_AW)) buffer0
 	.q_c(buffer0_dout_next),
 
 	.address_d(mac_addr + 2'd2),
-	.q_d(buffer0_dout_next2)
+	.q_d(buffer0_dout_next2),
+	.rd_ready(buffer0_ready)
 );
 
 wire [7:0] buffer1_dout;
@@ -425,7 +432,8 @@ scsi_dpram #(.ADDRWIDTH(BUF_AW)) buffer1
 	.q_c(buffer1_dout_next),
 
 	.address_d(mac_addr + 2'd2),
-	.q_d(buffer1_dout_next2)
+	.q_d(buffer1_dout_next2),
+	.rd_ready(buffer1_ready)
 );
 
 reg old_io_ack;
@@ -613,6 +621,7 @@ assign dout_pair_next = (phase == PHASE_STATUS_OUT)?{status, status}:
 assign dout_ahead_read = data_cnt[0] ? {buffer0_dout_next, buffer1_dout_next, buffer0_dout_next2}
                                      : {buffer1_dout,      buffer0_dout_next, buffer1_dout_next};
 assign dout_ahead_ok   = (phase == PHASE_DATA_OUT) && cmd_read;
+assign dout_ready      = !((phase == PHASE_DATA_OUT) && cmd_read) || (buffer0_ready && buffer1_ready);
 
 // de-multiplex different data sources
 wire [7:0] cmd_dout =
@@ -1415,14 +1424,16 @@ scsi_dpram #(.ADDRWIDTH(TB_ADDRW)) tb_buf0 (
 	.address_a(tb_hps_addr), .data_a(tb_buf0_da), .wren_a(tb_hps_wr), .q_a(tb_buf0_qa),
 	.address_b(tb_b_addr), .data_b(tb_b_d0), .wren_b(tb_b_wr0), .q_b(tb0_dout),
 	.address_c(tb_b_addr + 1'b1), .q_c(tb0_dout_next),
-	.address_d(tb_b_addr + 2'd2), .q_d(tb0_dout_next2)
+	.address_d(tb_b_addr + 2'd2), .q_d(tb0_dout_next2),
+	.rd_ready()
 );
 scsi_dpram #(.ADDRWIDTH(TB_ADDRW)) tb_buf1 (
 	.clock(clk),
 	.address_a(tb_hps_addr), .data_a(tb_buf1_da), .wren_a(tb_hps_wr), .q_a(tb_buf1_qa),
 	.address_b(tb_b_addr), .data_b(tb_b_d1), .wren_b(tb_b_wr1), .q_b(tb1_dout),
 	.address_c(tb_b_addr + 1'b1), .q_c(tb1_dout_next),
-	.address_d(tb_b_addr + 2'd2), .q_d(tb1_dout_next2)
+	.address_d(tb_b_addr + 2'd2), .q_d(tb1_dout_next2),
+	.rd_ready()
 );
 
 // Serve sources (mirror the disk read: even byte from buf0, odd from buf1).
@@ -3365,7 +3376,16 @@ module scsi_dpram #(parameter DATAWIDTH=8, ADDRWIDTH=9)
 	output reg [DATAWIDTH-1:0] q_c,
 
 	input	[ADDRWIDTH-1:0] address_d,
-	output reg [DATAWIDTH-1:0] q_d
+	output reg [DATAWIDTH-1:0] q_d,
+
+	// SGI LOCAL CHANGE: q_b holds ram[address_b] and q_c/q_d the look-ahead
+	// for the current address_c/address_d, this cycle. The TIMING CONTRACT
+	// below is a number of clocks after an address change; a port-A write to
+	// a look-ahead address re-arms the prefetch at any time, and while it
+	// steals port B, q_b holds the stolen byte - the NEXT word's - instead of
+	// the current one. The WD33C93B's DATA IN capture waits for this rather
+	// than for a count (rtl/scsi/wd33c93.sv, din_strict).
+	output                     rd_ready
 );
 
 // ram_ab is the ONLY storage array (pdma-prefetch redesign, 2026-07-17).
@@ -3457,6 +3477,17 @@ always @(posedge clock) begin
 		q_b <= ram_ab[address_b_eff];
 	end
 end
+
+// SGI: the read that produced q_b was the real address, and no port-A write
+// landed on it in the same cycle (no_rw_check: that read returns the old byte).
+reg [ADDRWIDTH-1:0] rd_addr_q = {ADDRWIDTH{1'b1}};
+reg                 rd_hit_q  = 1'b0;
+always @(posedge clock) begin
+	rd_addr_q <= address_b_eff;
+	rd_hit_q  <= wren_a && (address_a == address_b_eff);
+end
+assign rd_ready = (rd_addr_q == address_b) && !rd_hit_q &&
+                  (pf_st == PF_IDLE) && !pf_stale && !pf_snoop_hit;
 
 // ---- controller sequencing + q_c/q_d capture -----------------------------
 always @(posedge clock) begin

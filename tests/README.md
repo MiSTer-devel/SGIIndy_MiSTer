@@ -18,6 +18,7 @@ tests/run-cputest.sh       # the IRIS cpu-tests suite, against a reference log
 tests/run-prom.sh          # boot the real IP24 PROM to the Command Monitor
 tests/run-scsi.sh          # the same boot with a disk on ID 1
 tests/run-cdrom.sh         # the same boot with a CD-ROM image on ID 6 as well
+tests/run-audio.sh         # the same boot with the audio fitted: the startup tune, off the DAC
 tests/run-newport.sh       # the same boot with graphics: the picture on the pins
 tests/run-rex3.sh          # every pixel REX3 drew against every command it got
 tests/run-irix.sh          # an installed IRIX 5.3 booted to the kernel banner
@@ -255,6 +256,25 @@ in it, so the same `hinv` line appears in `run-scsi.sh` with no image at all.
 Reading a disc is `run-scsiwr.sh`'s last phase. The image here is built by the
 script, with a pattern rather than zeros, for the reason that phase gives. It
 needs `tests/disks/blank8m.img` as `run-scsi.sh` does.
+
+## `run-audio.sh` — the startup tune, off the DAC
+
+The PROM boot with `--audio`, which makes HAL2 report itself present: the PROM
+then decodes its startup tune from ADPCM into RAM, builds an EOX descriptor
+chain split at 4 KB boundaries, starts PBUS DMA channels 1 and 2 on it, and
+plays it through HAL2 at 44.1 kHz. `--wav` records the DAC at the tune's own
+rate, half a sample period out of phase with HAL2's clock, so every sample it
+plays is taken exactly once, and `tools/prom_tune.py` decodes the same tune
+straight from the PROM image and checks the recording sample for sample,
+scaled by the volume the PROM writes (its NVRAM default, 80). Then `hinv` must
+list `Audio: Iris Audio Processor: version A2 revision 4.1.0`.
+
+Nothing in the chain is taken on trust: the decoder is the PROM's, run by the
+CPU; the descriptors are the PROM's; the channel, clock and mode come from the
+PROM's HAL2 writes. The audio clock is a tenth of the core clock in the
+simulator, like its microsecond, so the 2.09 s tune is about ten million
+cycles. `make -C verilator audiotest` is the module-level bench under it
+([docs/design/audio.md](../docs/design/audio.md)).
 
 ## `run-scsiwr.sh` — the SCSI data path, in both directions
 

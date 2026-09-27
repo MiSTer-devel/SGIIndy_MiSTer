@@ -143,25 +143,46 @@ module sgi_ds1386 #(
     // path inference depends on. Check `Total registers` in the map summary
     // regardless - about 38,500 is right, 65,000 higher means these two banks
     // are flip-flops again.
+    //
+    // AND ON THE FIRST RESET AFTER THE CORE IS LOADED, THE VOLUME. The PROM
+    // plays its startup tune (0xBFC030B4, called at 0xBFC02180) only if the
+    // `volume` variable - PROM offset 0xE8, three bytes, device bytes
+    // 0x128..0x12A - reads non-zero, and it reads the raw NVRAM field, BEFORE
+    // its environment check at 0xBFC02188 writes the defaults. A real Indy's
+    // battery keeps "80" there (the default at 0xBFC4CF40); this NVRAM is
+    // empty after every load, so without this the first boot is silent and
+    // only a reset plays the chime. "80" goes into the empty field once, on
+    // the first reset: a `setenv volume 0` then survives resets as it would
+    // on the real machine, and a reload starts from an empty NVRAM anyway.
+    // The terminating NUL at 0x12A is already there - the field is empty.
     logic [1:0] seed_idx;
     logic       seeding;
+    logic       nv_cold = 1'b1;     // power-up value: no reset after the load yet
     always_ff @(posedge clk) begin
         if (reset) begin
             seeding  <= 1'b1;
             seed_idx <= 2'd0;
         end else if (seeding) begin
             seed_idx <= seed_idx + 2'd1;
-            if (seed_idx == 2'd2) seeding <= 1'b0;
+            if (seed_idx == 2'd3) begin
+                seeding <= 1'b0;
+                nv_cold <= 1'b0;
+            end
         end
     end
 
-    wire [11:0] seed_addr = 12'h09D + {10'd0, seed_idx};
+    wire        seed_vol  = (seed_idx == 2'd3);
+    wire [11:0] seed_addr = seed_vol ? 12'h094 : 12'h09D + {10'd0, seed_idx};
     wire  [7:0] seed_d0 = (seed_idx == 2'd0) ? mac_addr[47:40]     // 0x13A
                         : (seed_idx == 2'd1) ? mac_addr[31:24]     // 0x13C
-                        :                      mac_addr[15:8];     // 0x13E
+                        : (seed_idx == 2'd2) ? mac_addr[15:8]      // 0x13E
+                        :                      8'h38;              // 0x128 '8'
     wire  [7:0] seed_d1 = (seed_idx == 2'd0) ? mac_addr[39:32]     // 0x13B
                         : (seed_idx == 2'd1) ? mac_addr[23:16]     // 0x13D
-                        :                      mac_addr[7:0];      // 0x13F
+                        : (seed_idx == 2'd2) ? mac_addr[7:0]       // 0x13F
+                        :                      8'h30;              // 0x129 '0'
+    // The volume's step writes only while the NVRAM is cold.
+    wire        seed_we   = seeding && (!seed_vol || nv_cold);
     logic [31:0] tick;
 
     wire te = rtc[R_COMMAND][7];
@@ -242,11 +263,11 @@ module sgi_ds1386 #(
     wire [1:0] wr_en = {sel && we && (|be[3:0]), sel && we && (|be[7:4])};
 
     // One plain enabled store per bank, with the seed muxed in ahead of the
-    // guest's own writes. `seeding` is only ever high for three cycles just
+    // guest's own writes. `seeding` is only ever high for four cycles just
     // after reset, when nothing else is on the bus.
     wire [11:0] nv_waddr = seeding ? seed_addr : addr[14:3];
-    wire        nv0_we   = seeding | (wr_en[0] && !dev_low);
-    wire        nv1_we   = seeding | (wr_en[1] && !dev_low);
+    wire        nv0_we   = seeding ? seed_we : (wr_en[0] && !dev_low);
+    wire        nv1_we   = seeding ? seed_we : (wr_en[1] && !dev_low);
     wire  [7:0] nv0_wdat = seeding ? seed_d0 : dev_wr_byte(1'b0);
     wire  [7:0] nv1_wdat = seeding ? seed_d1 : dev_wr_byte(1'b1);
 

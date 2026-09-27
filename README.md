@@ -17,14 +17,14 @@ programs drawn by a reimplementation of the Newport (XL) graphics board.
 | **Memory** | 32, 48 or 64 MB |
 | **Storage** | the WD33C93 SCSI controller with two disks (SCSI IDs 1 and 2) and a CD-ROM drive (SCSI ID 6), all as image files on the SD card |
 | **Clock** | the Dallas DS1386 real-time clock, set from the MiSTer's clock at every start |
+| **Sound** | the HAL2 audio processor fed by HPC3's PBUS DMA: the PROM's startup chime, and IRIX's audio (`kdsp_a2`) at 48 kHz stereo through the MiSTer's audio output, with IRIX's volume control |
 
 ### Not there yet
 
 - **Networking**: IRIX sees `ec0` but there is no Ethernet behind it, so it
   reports `no carrier`.
-- **Sound**: the HAL2 audio processor is not implemented. The core tells the
-  PROM and IRIX there is no audio hardware, and nothing reaches the MiSTer's
-  audio output.
+- **Sound input and digital audio**: the analogue and AES inputs record
+  silence, and the AES output goes nowhere.
 - **Saved PROM settings**: the PROM's environment (`setenv`) is not kept when
   the core is reloaded. The defaults boot from the disk at SCSI ID 1, which is
   all IRIX needs.
@@ -94,6 +94,7 @@ wait: the PROM boots it on its own.
 | **Video debug** | *Raw index* shows the frame buffer's colour indices without the palette |
 | **UART debug** | test patterns on the UART pins, for checking a serial cable |
 | **SCSI cache** | *On* caches disk blocks in the FPGA, which makes disk access much faster |
+| **Audio** | *On* fits the HAL2 audio processor. *Off* makes the machine report no audio hardware, so the PROM plays no chime and IRIX loads no audio driver - the way out if audio ever misbehaves. Takes effect at the next reset |
 | **Aspect ratio** | how the scaler fits the picture |
 | **Reset** | resets the machine. Shut IRIX down first - see below |
 
