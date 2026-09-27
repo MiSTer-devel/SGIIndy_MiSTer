@@ -96,15 +96,12 @@ wait_x() {
     done
 }
 
-# Park the pointer in the chooser's first icon and type root (docs: the
-# desktop input recipe), then give the desktop time to settle.
+# Log in as root and clear Software Manager off the Console: it opens by
+# itself after a root login and takes every typed key (scripts/desktop.sh).
+. scripts/desktop.sh
 login() {
-    local steps=()
-    for i in $(seq 1 30); do steps+=("mouseMove:-60,-60" "sleep:0.05"); done
-    for i in $(seq 1 39); do steps+=("mouseMove:7,10" "sleep:0.05"); done
-    ws "${steps[@]}"
-    ws "text:root" "sleep:0.3" "kbdRaw:28"
-    rsh "sleep 40"
+    login_root
+    quit_swmgr
 }
 
 # Are kdsp_a2's rings running? Words moved over 10 s, and which channels.
@@ -130,6 +127,8 @@ if [ "$AUTOCONF" = 1 ]; then
     # moves /unix.install over /unix on the way down.
     say "autoconfig -f, then init 6 onto the relinked kernel" | tee -a "$LOG"
     ws "text:/etc/autoconfig -f > /usr/tmp/autoconfig.log 2>&1; sync; sync; init 6" "sleep:0.3" "kbdRaw:28"
+    rsh "sleep 5"
+    bash scripts/grab.sh "${LOG%.log}-autoconfig.png" >/dev/null 2>&1
     T0=$(date +%s)
     PS_ARG="--panicstr 0"     # every symbol moved; judge by the screen alone
     wait_x 1500 reboot
@@ -147,6 +146,8 @@ fi
 W0=$(words "$(aud)")
 say "playing $SOUND"
 ws "text:playaiff $SOUND" "sleep:0.3" "kbdRaw:28"
+rsh "sleep 1"
+bash scripts/grab.sh "${LOG%.log}-playing.png" >/dev/null 2>&1
 NZ=0
 for i in 1 2 3 4 5 6 7 8; do
     rsh "sleep 2"; A=$(aud); L=$(lastsamp "$A")

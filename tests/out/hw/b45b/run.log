@@ -1,0 +1,10 @@
+[12:47:56] staging output_files/sgiindy-b45b.rbf md5 64cdbdc3f39bbf900b545906c66936b8; steps: audio cpu cdoff cdon
+[12:47:58] audioprobe
+[12:56:27] audioprobe rc=0 | [12:53:12] PROM: 12:53:12 audio: frames=1344975 ops=2898356 underruns=1 overruns=0 peak=32768 last=0 | pbus running=0x0 int=0x0 descriptors=182 words=184304|[12:54:27] login screen: 12:54:17 audio: frames=4427440 ops=12145751 underruns=1 overruns=0 peak=32768 last=0 | pbus running=0x0 int=0x0 descriptors=182 words=184304|[12:56:13] AUDIO PEAK DID NOT RISE (32768 -> 32768)|[12:56:27] HALT REACHED THE PROM|
+[12:56:27] cpu-tests as PROM
+[12:59:43] cputest rc=0 |  RESULT: 2415 checks passed, 0 failed  (255 tests)| RESULT: 2415 checks passed, 0 failed  (255 tests)|
+[12:59:43] cdfile dinstrict=off
+[13:10:43] cdfile-off rc=1 | [13:09:40] din: waited 0 clocks for the target's buffers, 0 captures while not ready, 0 forced|
+[13:10:43] cdfile default
+[13:21:44] cdfile-on rc=1 | [13:20:41] din: waited 0 clocks for the target's buffers, 0 captures while not ready, 0 forced|
+[13:21:45] BOARDRUN DONE

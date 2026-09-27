@@ -13,7 +13,7 @@
 # SCSI ID1 slot and the CD in ID6, log in as root, type into the desktop's
 # Console window. Here that is
 #
-#     mount -r -t efs /dev/dsk/dks0d6s7 /CDROM   (harmless if mediad has it)
+#     mount -r -t efs /dev/dsk/dks0d6s7 /CDROM   (harmless: mediad has it)
 #     cp /CDROM/dist/NAME /usr/tmp/cdfile.bin; sync
 #
 # then a halt (init 0), and ON THE BOARD the copy is lifted out of the disk
@@ -89,17 +89,19 @@ while :; do
 done
 rsh "sleep 15"
 say "parking the pointer, logging in as root"
-STEPS=()
-for i in $(seq 1 30); do STEPS+=("mouseMove:-60,-60" "sleep:0.05"); done
-for i in $(seq 1 39); do STEPS+=("mouseMove:7,10" "sleep:0.05"); done
-ws "${STEPS[@]}"
-ws "text:root" "sleep:0.3" "kbdRaw:28"
-rsh "sleep 35"
+# Software Manager opens by itself after a root login - mediad has mounted the
+# CD - and takes every typed key; both arms of build 45b's first A/B typed the
+# mount line into its search field. scripts/desktop.sh quits it.
+. scripts/desktop.sh
+login_root
+quit_swmgr
 
 S0=$(stats); B0=$(bytes_of "$S0")
 say "copying $FILE off the CD"
 ws "text:mkdir -p /CDROM; mount -r -t efs /dev/dsk/dks0d6s7 /CDROM; rm -f /usr/tmp/cdfile.bin" "sleep:0.3" "kbdRaw:28"
 rsh "sleep 8"
+# The screen after the first command: evidence it reached a shell.
+bash scripts/grab.sh "${LOG%.log}-typed.png" >/dev/null 2>&1
 ws "text:cp /CDROM$FILE /usr/tmp/cdfile.bin; sync; sync" "sleep:0.3" "kbdRaw:28"
 TT=$(date +%s); TFIRST=0; PREV=$B0; STILL=0
 while :; do
