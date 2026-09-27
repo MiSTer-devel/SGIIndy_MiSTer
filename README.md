@@ -34,12 +34,13 @@ programs drawn by a reimplementation of the Newport (XL) graphics board.
   (the MiSTer scaler converts it to your HDMI mode).
 - Parallel port, ISDN, video capture (VINO) and IndyCam are not implemented.
 
-### Known bug
+### Fixed since the first release
 
-**A disk read can rarely come back with two bytes wrong.** Installing IRIX from
-the CD, `inst`'s checksums catch exactly one file with the last 32-bit word of a
-disk block half overwritten, the same way every time; the CD image is proven
-good. Until it is fixed, keep a backup copy of your disk image.
+**CD reads could come back with a byte wrong.** Installing IRIX from the CD,
+`inst`'s checksums caught one file with the last word of a disk block damaged,
+the same way every time. The SCSI controller could take a byte before the
+drive's buffer was ready; that is fixed (the file now copies off the CD
+bit-identical). Keeping a backup copy of your disk image is still wise.
 
 ## Requirements
 
@@ -109,6 +110,11 @@ time the core starts.
   session can leave the root filesystem needing a long `fsck` on the next boot.
 - **Back up your disk image.** Keep a copy of a freshly installed image; it is
   the quickest way back from a damaged filesystem.
+- **Sound on an existing IRIX image needs one step.** IRIX links its audio
+  driver into the kernel only if the audio hardware answers when the kernel is
+  built, and images set up on earlier versions of this core (which reported no
+  audio) have a kernel without it. With *Audio* on, log in as root, run
+  `/etc/autoconfig -f`, and reboot (`init 6`). A fresh install includes it.
 - The display is 1280x1024; the MiSTer scaler fits it to your screen.
 - The keyboard and mouse are MiSTer's USB devices, presented to IRIX as the
   Indy's PS/2 keyboard and mouse.
