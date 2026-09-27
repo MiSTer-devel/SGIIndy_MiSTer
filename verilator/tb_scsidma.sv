@@ -67,7 +67,7 @@ logic [63:0] mem [0:8191];
 int          grant_dly = 0;    // clocks a request waits before it is taken
 int          ack_dly   = 12;   // clocks from taken to acknowledged
 bit          rand_lat  = 0;    // T7: both drawn at random for every request
-localparam int T7_RUNS = 400;
+localparam int T7_RUNS = 4000;
 logic [63:0] last_rd  = 64'h0;
 
 // Allowed write windows [lo, hi), byte addresses.

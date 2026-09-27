@@ -208,6 +208,7 @@ struct Options {
     bool        scsi_cache = true;
     // The audio switch, and where --wav writes the DAC's output.
     bool        audio = false;
+    bool        ipf = true;       // ram_arb's instruction prefetch buffer
     std::string wav;
     uint32_t    wav_rate = 44100;
     // Which cpu_error bits abort the run. See kErrorNames: only the two that
@@ -335,6 +336,7 @@ static void usage()
         "  --pc-count N      how many PCs to print (default 2000)\n"
         "  --scsi-nocache    bypass the SCSI block cache (docs/design/scsi-block-cache.md): every block\n"
         "                    request is one HPS transaction, as before build 26\n"
+        "  --no-ipf          ram_arb's instruction prefetch buffer off (build 46)\n"
         "  --audio           fit the audio (HAL2 reports itself present); the\n"
         "                    PROM then plays its startup tune\n"
         "  --wav FILE        implies --audio: write the DAC's output as a 16-bit\n"
@@ -437,6 +439,7 @@ int main(int argc, char **argv)
         else if (a == "--pc-count")   opt.pc_count = strtoull(next("--pc-count"), nullptr, 0);
         else if (a == "--no-gfx")     opt.gfx = false;
         else if (a == "--audio")      opt.audio = true;
+        else if (a == "--no-ipf")     opt.ipf = false;
         else if (a == "--wav")        { opt.audio = true; opt.wav = next("--wav"); }
         else if (a == "--wav-rate")   opt.wav_rate = strtoul(next("--wav-rate"), nullptr, 0);
         else if (a == "--scsi-nocache") opt.scsi_cache = false;
@@ -582,6 +585,7 @@ int main(int argc, char **argv)
     top->dcache_en   = opt.dcache ? 1 : 0;
     top->scsi_cache_bypass = opt.scsi_cache ? 0 : 1;
     top->audio_en    = opt.audio ? 1 : 0;
+    top->ipf_en      = opt.ipf ? 1 : 0;
     top->rxdb        = 1;                 // idle mark; nothing types at the console here
     top->ps2_key     = 0;
     top->ps2_mouse   = 0;
@@ -1117,6 +1121,9 @@ int main(int argc, char **argv)
         printf("perf: I-cache refills after an instruction TLB walk %llu, "
                "fill requests answered from the cache %llu\n",
                hi(top->perf8), lo(top->perf8));
+        printf("perf: instruction fills answered from the prefetch buffer %llu, "
+               "fills that fetched the next two lines %llu%s\n",
+               hi(top->perf11), lo(top->perf11), opt.ipf ? "" : " (--no-ipf)");
     }
 
     if (opt.audio) {

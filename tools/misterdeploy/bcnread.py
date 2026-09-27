@@ -30,7 +30,8 @@ Usage (on the MiSTer):
     bcnread.py                one decoded sample
     bcnread.py --loop 30 --interval 2      sample for a minute
     bcnread.py --raw          just the hex words
-    bcnread.py --perf         (ver >= 10, docs/design/cpu-speed-tlb-icache.md; 36-39 from ver 12, build 37) the performance counters,
+    bcnread.py --perf         (ver >= 10, docs/design/cpu-speed-tlb-icache.md; 36-39 from ver 12, build 37;
+                              word 47's instruction prefetch hits and fills appended from ver 16) the performance counters,
                               raw, as one line of 28 integers (30 from
                               ver 11, word 35); two of these
                               a workload apart are the workload's breakdown:
@@ -54,7 +55,7 @@ _m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(_m)
 
 BASE = 0x35800000
-NWORDS = 47
+NWORDS = 48
 CLK_HZ = 50_000_000          # clk_sys; the x64 counters are in units of 64 cycles
 PHASES = ["IDLE", "CMD_IN", "DATA_OUT", "DATA_IN", "STATUS", "MSG_IN", "TB", "MSG_OUT"]
 DSTATES = ["IDLE", "FETCH_LO", "FETCH_LO_W", "FETCH_HI", "FETCH_HI_W", "EVAL",
@@ -293,6 +294,10 @@ def main():
                 last = 40 if ver >= 12 else 36 if ver >= 11 else 35
                 for w in ws[21:last]:
                     vals += [bits(w, 63, 32), bits(w, 31, 0)]
+                # ver 16 (build 46): word 47, {prefetch-buffer hits, prefetching
+                # fills}, appended so perfdiff.py's positions do not move
+                if ver >= 16:
+                    vals += [bits(ws[47], 63, 32), bits(ws[47], 31, 0)]
                 print("perf %.3f beat=%d %s" % (time.time(), bits(ws[0], 31, 0),
                                                " ".join(str(v) for v in vals)))
         elif a.audio:

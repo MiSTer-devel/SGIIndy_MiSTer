@@ -320,3 +320,55 @@ Two readings of the counters:
   read twice per access) are the next flip-flop storage.
 * **The board slowed down** between 18:00 and 23:30 with the same bitstream
   (§4); worth finding what shares the DDR3 controller now.
+
+## 8. Build 46: the instruction fill that brings the next two lines
+
+Section 7 ended on "fewer trips". The instruction stream says where they are:
+`tools/ipfsim.c` replays the IRIX boot's fetch trace (`--itrace`, 18.9M line
+changes, 588,454 misses in the 16 KB direct-mapped cache) and **53.4 % of the
+misses are to the line after the previous miss** - straight-line code
+running off the end of a line. The next line is nearly always the very next
+line the CPU touches (distance 1 in 337,025 of ~369,000 cases), so a prefetch
+that starts after the miss's fill arrives while the CPU is still executing the
+eight instructions it was waiting for - most of its latency still in front of
+it. Fetching the lines *with* the miss does not have that problem: the bridge's
+9.5 clocks are paid once per request, and the extra words follow at a word a
+clock.
+
+| model, on the boot trace | DDR3 instruction fills, vs today |
+|---|---:|
+| one-line stream buffer, refilled in the background after every fill | 46.6 % |
+| a miss fetches L..L+1 (one extra line) | 64.6 % |
+| **a miss fetches L..L+2 (two extra lines)** | **54.2 %** |
+| a miss fetches L..L+3 | 48.9 % |
+| 64-byte lines in the cache itself | 62.7 % |
+
+**`rtl/sgi/ram_arb.sv`** does the third row. An instruction line fill
+(`r4300_bus` tags it: `bus_ifill`, mem_size "101") that misses the buffer
+goes to `ddr3_mux` as a **12-word burst**; words 0-3 go to the CPU as before,
+with `cpu_last` on the fourth, and words 4-11 go into a two-line buffer tagged
+with the RAM offset. A later instruction fill of either line is answered from
+the buffer, four words from the clock after its request, with no port
+transaction - and a DMA transaction may take the port in that same clock. The
+port stays busy for the eight extra words, which is the whole cost.
+
+**Coherence is a snoop at the one place every write passes.** A CPU store, a
+data-cache writeback and every DMA engine's write is issued to the port by
+`ram_arb`; one issued into a buffered line invalidates it. The tag is the RAM
+offset, so the low-memory alias and MEMCFG's banks cannot give one line two
+names; and no write can land while a burst is filling the buffer, because that
+burst is the port's one transaction.
+
+`ddr3_mux`, `sim_ram.v` and the ports between them carry a 4-bit burst now.
+The hidden `status[21]` (`scripts/setopt.sh ipf=off`, `--no-ipf` in the
+simulator) turns the buffer off, so one bitstream measures it both ways.
+Beacon word 47 (version 16) counts buffer hits and prefetching fills;
+`bcnread.py --perf` appends them to its line.
+
+Tests: `make -C verilator tb_ipf` drives `ram_arb` against a slow
+one-transaction memory holding real values, with the CPU storing into and
+writing back over the buffered lines and a DMA master writing underneath -
+every word handed to the CPU must be what memory held (60,000 random
+transactions, 19,584 buffer hits, 0 wrong). With the snoop removed it fails at
+once. `ramarbtest` (the arbiter's protocol at latencies 1/12/60) passes
+unchanged.

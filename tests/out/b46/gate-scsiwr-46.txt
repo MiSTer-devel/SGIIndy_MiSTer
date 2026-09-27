@@ -1,0 +1,130 @@
+ELF: /home/dani/sgimd/tests/scsiwr/build/scsiwr.elf  entry 88200000
+  seg0  vaddr 88200000  phys 08200000  file    4904  mem   54208
+SCSI 1: /home/dani/sgimd/tests/out/scratch8m.img (16384 blocks)
+SCSI 6: /home/dani/sgimd/tests/out/scsiwr8m.iso (16384 blocks)
+boot PC 88200000, RAM 64 MB, testdev yes, I$ on, D$ on
+Image mounted on target 1, size:      16384
+Image mounted on target 6, size:      16384
+
+SCSI DATA PATH
+  ok   reset reports 0x00
+  ok   control reads back in DMA mode
+  -- one block, WRITE(New command on target 1: 0a 00 00 00 01 00 00 00 00 00
+6)
+  ok   WRITE(6) completes
+  ok   the channel drained its byte count
+New command on target 1: 08 00 00 00 01 00 00 00 00 00
+  ok   READ(6) completes
+  ok   the data read back is not all zero
+  ok   every byte survived the round trip
+  -- four blocks, WRITE(6)
+New command on target 1: 0a 00 00 08 04 00 00 00 00 00
+  ok   WRITE(6) completes
+  ok   the channel drained its byte count
+New command on target 1: 08 00 00 08 04 00 00 00 00 00
+  ok   READ(6) completes
+  ok   the data read back is not all zero
+  ok   every byte survived the round trip
+  -- four blocks, WRITE(10)
+New command on target 1: 2a 00 00 00 2e e0 00 00 04 00
+  ok   WRITE(10) completes
+  ok   the channel drained its byte count
+New command on target 1: 28 00 00 00 2e e0 00 00 04 00
+  ok   READ(10) completes
+  ok   the data read back is not all zero
+  ok   every byte survived the round trip
+  -- four blocks over a descriptor chain
+New command on target 1: 0a 00 00 28 04 00 00 00 04 00
+  ok   WRITE(6) completes
+  ok   the channel drained its byte count
+New command on target 1: 08 00 00 28 04 00 00 00 04 00
+  ok   READ(6) completes
+  ok   the data read back is not all zero
+  ok   every byte survived the round trip
+  -- thirty-two blocks, WRITE(10), four descriptors
+New command on target 1: 2a 00 00 00 00 c8 00 00 20 00
+  ok   WRITE(10) completes
+  ok   the channel drained its byte count
+New command on target 1: 28 00 00 00 00 c8 00 00 20 00
+  ok   READ(10) completes
+  ok   the data read back is not all zero
+  ok   every byte survived the round trip
+  -- four logical blocks off the CD-ROM, READ(10)
+New command on target 6: 28 00 00 00 00 05 00 00 04 00
+  ok   READ(10) on the CD-ROM completes
+  ok   the disc's bytes are the bytes that were on it
+SCSIWR: ALL PASS 00000000
+
+--- testdev-exit after 11713918 cycles, 491803 bus transactions ---
+perf: 7128384 instructions, clocks: run 7128448, fetch held 3712, execute held 4450624, writeback held 4163392, TLB walk 0 (counters are x64)
+perf: I-cache fills 112 (0.02 per 1000 instructions), D-cache fills 2122 (0.30), writeback beats 6360, uncached fetches 2052
+perf: TLB walks instruction 0 (0.00 per 1000), data 0 (0.00); bus transactions 485101; clocks on the bus for I-fills 768, D-fills 14848
+perf: I-cache refills after an instruction TLB walk 0, fill requests answered from the cache 0
+perf: instruction fills answered from the prefetch buffer 56, fills that fetched the next two lines 56
+last 64 PCs decoded (oldest first), 11711852 total:
+  [  11713855] 88200fcc
+  [  11713856] 88200fc4
+  [  11713857] 88200fc8
+  [  11713858] 88200fcc
+  [  11713859] 88200fc4
+  [  11713860] 88200fc8
+  [  11713861] 88200fcc
+  [  11713862] 88200fc4
+  [  11713863] 88200fc8
+  [  11713864] 88200fcc
+  [  11713865] 88200fc4
+  [  11713866] 88200fc8
+  [  11713867] 88200fcc
+  [  11713868] 88200fc4
+  [  11713869] 88200fc8
+  [  11713870] 88200fcc
+  [  11713871] 88200fd0
+  [  11713872] 88200fd4
+  [  11713873] 88200fd8
+  [  11713874] 88200fdc
+  [  11713875] 88200fdc
+  [  11713876] 88200fdc
+  [  11713877] 88200fdc
+  [  11713878] 88200fdc
+  [  11713879] 88200fdc
+  [  11713880] 88200fdc
+  [  11713881] 88200fdc
+  [  11713882] 88200fdc
+  [  11713883] 88200fdc
+  [  11713884] 88200fdc
+  [  11713885] 88200fdc
+  [  11713886] 88200fdc
+  [  11713887] 88200fdc
+  [  11713888] 88200fdc
+  [  11713889] 88200fdc
+  [  11713890] 88200fdc
+  [  11713891] 88200fe0
+  [  11713892] 88200fe4
+  [  11713893] 88200ff0
+  [  11713894] 88200ff4
+  [  11713895] 88200ff4
+  [  11713896] 88200ff8
+  [  11713897] 88200ffc
+  [  11713898] 88200ffc
+  [  11713899] 88200ffc
+  [  11713900] 88200ffc
+  [  11713901] 88200ffc
+  [  11713902] 88200ffc
+  [  11713903] 88200ffc
+  [  11713904] 88200ffc
+  [  11713905] 88200ffc
+  [  11713906] 88200ffc
+  [  11713907] 88200ffc
+  [  11713908] 88200ffc
+  [  11713909] 88200ffc
+  [  11713910] 88200ffc
+  [  11713911] 88200ffc
+  [  11713912] 88201000
+  [  11713913] 88200fe8
+  [  11713914] 88200fec
+  [  11713915] 88200fe8
+  [  11713916] 88200fec
+  [  11713917] 88200fe8
+  [  11713918] 88200fec
+
+SCSIWR: PASS

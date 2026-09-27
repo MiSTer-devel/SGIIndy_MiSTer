@@ -1,0 +1,21 @@
+start Sun Sep 27 15:52:49 EDT 2026
+synced
+unit ipf rc=0 tb_ipf: 15 checks, 0 failed IPF: PASS 
+unit scsidma rc=0 tb_scsidma: 26 checks, 0 failed SCSIDMA: PASS 
+unit ramarb rc=0 
+  ramarb lat 1: ram_arb: PASS
+  ramarb lat 12: ram_arb: PASS
+  ramarb lat 60: ram_arb: PASS
+unit ddr3 rc=0 
+unit hpc3 rc=0 T7 done: 24710 checks, 0 errors TB_HPC3 PASS (24710 checks) 
+unit audio rc=0 69 checks, 0 failures; 2298 memory transactions TB_AUDIO PASS 
+-rwxr-xr-x 1 dani dani 1536160 Sep 27 15:54 /home/dani/sgimd/verilator/obj_wm/Vsim_top
+cputest-ipf rc=55 54s  RESULT: 2109 checks passed, 55 failed  (240 tests) | perf: instruction fills answered from the prefetch buffer 1660, fills that fetched the next two lines 1531 
+cputest-noipf rc=55 54s  RESULT: 2109 checks passed, 55 failed  (240 tests) | perf: instruction fills answered from the prefetch buffer 0, fills that fetched the next two lines 0 (--no-ipf) 
+dma rc=0 83s DMA: ALL PASS 00000000 DMA: PASS 
+scsiwr rc=0 124s SCSIWR: ALL PASS 00000000 SCSIWR: PASS 
+prom rc=0 756s PROM: PASS 
+cdrom rc=0 764s CDROM: PASS 
+scsi rc=0 770s SCSI: PASS 
+audio rc=0 1011s   TUNE CHECK PASS AUDIO: PASS 
+done Sun Sep 27 16:10:52 EDT 2026

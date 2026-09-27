@@ -27,6 +27,9 @@
 #                                  look-ahead (rtl/scsi/wd33c93.sv), an instrument
 #   dinstrict=on|off     status[20], no OSD entry: the DATA IN capture waits for
 #                                  scsi.v's buffers to be current; off = build 44
+#   ipf=on|off           status[21], no OSD entry: ram_arb's instruction prefetch
+#                                  buffer (build 46); off = every instruction
+#                                  fill one 4-word read, as before
 #
 # Usage: bash scripts/setopt.sh gfx=none uartdbg=ser
 #        bash scripts/setopt.sh            # all defaults
@@ -54,6 +57,8 @@ FIELDS = {                       # name: (low bit, width, {value: code})
     "lookahead": (19, 1, {"on": 0, "off": 1}),
     # No OSD entry: the DATA IN capture waits for the target's buffers.
     "dinstrict": (20, 1, {"on": 0, "off": 1}),
+    # No OSD entry: ram_arb's instruction prefetch buffer.
+    "ipf":     (21, 1, {"on": 0, "off": 1}),
 }
 st = 0
 for arg in sys.argv[1:]:

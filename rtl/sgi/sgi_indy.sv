@@ -98,6 +98,9 @@ module sgi_indy #(
     // The WD33C93B's DATA IN capture waits for the target's buffers to be
     // current (rtl/scsi/wd33c93.sv din_strict): on normally.
     input  logic        scsi_din_strict,
+    // ram_arb's instruction prefetch buffer (build 46): on normally; off is
+    // the A/B for measuring it.
+    input  logic        ipf_enable,
 
     // Megabytes of DRAM actually fitted. Drives the MC's bank decode; on
     // hardware this is a constant and folds away.
@@ -133,7 +136,7 @@ module sgi_indy #(
     // A read may ask for 1..4 consecutive words - the CPU's line fills do -
     // and is then answered with one `ram_ack` per word, `ram_last` on the
     // final one. See rtl/cpu/r4300_bus.sv and rtl/mister/ddr3_mux.sv.
-    output logic  [2:0] ram_burst,
+    output logic  [3:0] ram_burst,     // 1..4, or 12: ram_arb's prefetching fill
     // A line write's words 1..3 (build 38); see rtl/cpu/r4300_bus.sv.
     output logic [191:0] ram_wdata3,
     input  logic [63:0] ram_rdata,
@@ -258,7 +261,7 @@ module sgi_indy #(
     output logic        dbg_retire,
     // The CPU performance counters (docs/design/cpu-speed-tlb-icache.md), nine beacon words. See the
     // block that builds them for the layout.
-    output logic [63:0] dbg_perf_bcn [11],
+    output logic [63:0] dbg_perf_bcn [12],
     // The instruction cache's access stream (simulator --itrace; the board
     // leaves it unconnected). See cpu.vhd's dbg_ifetch.
     output logic [32:0] dbg_ifetch,
@@ -401,6 +404,7 @@ module sgi_indy #(
     logic  [7:0] bus_be;
     logic  [2:0] bus_aoff;
     logic  [2:0] bus_burst;
+    logic        bus_ifill;
     logic        bus_last;
 
     r4300_bus u_bus (
@@ -426,6 +430,7 @@ module sgi_indy #(
         .bus_be        (bus_be),
         .bus_aoff      (bus_aoff),
         .bus_burst     (bus_burst),
+        .bus_ifill     (bus_ifill),
         .bus_wdata3    (bus_wdata3),
         .bus_rdata     (bus_rdata),
         .bus_ack       (bus_ack),
@@ -578,6 +583,8 @@ module sgi_indy #(
     wire cpu_ram_req = bus_req && sel_ram && mem_hit;
     wire arb_cpu_wait, arb_dma_go;     // observation only: the counters below
     wire cpu_ram_ack;
+    wire [63:0] cpu_ram_rdata;   // the port's word, or ram_arb's prefetch buffer's
+    wire arb_pf_hit, arb_pf_fill;
     wire cpu_ram_last;
     wire dma_port_ack;
     wire dma_grant;
@@ -593,8 +600,11 @@ module sgi_indy #(
         .cpu_be     (bus_be),
         .cpu_burst  (bus_burst),
         .cpu_wdata3 (bus_wdata3),
+        .cpu_ifill  (bus_ifill),
+        .pf_enable  (ipf_enable),
         .cpu_ack    (cpu_ram_ack),
         .cpu_last   (cpu_ram_last),
+        .cpu_rdata  (cpu_ram_rdata),
 
         .dma_req    (dma_req && dma_hit),
         .dma_we     (dma_we),
@@ -611,11 +621,14 @@ module sgi_indy #(
         .ram_be     (ram_be),
         .ram_burst  (ram_burst),
         .ram_wdata3 (ram_wdata3),
+        .ram_rdata  (ram_rdata),
         .ram_ack    (ram_ack),
         .ram_last   (ram_last),
 
         .dbg_cpu_wait(arb_cpu_wait),
-        .dbg_dma_go  (arb_dma_go)
+        .dbg_dma_go  (arb_dma_go),
+        .dbg_pf_hit  (arb_pf_hit),
+        .dbg_pf_fill (arb_pf_fill)
     );
 
     // The engine's addresses are physical, so they go through the same MEMCFG
@@ -1011,7 +1024,8 @@ module sgi_indy #(
     logic [37:0] pc_retired, pc_run, pc_st1, pc_st3, pc_st4, pc_tlb,
                  pc_ifill_bus, pc_dfill_bus, pc_bus, pc_arb_wait;
     logic [31:0] pc_ifills, pc_dfills, pc_wbbeats, pc_ufetch, pc_tlbi_walks,
-                 pc_tlbd_walks, pc_memreq, pc_irefills, pc_icached, pc_dma_n;
+                 pc_tlbd_walks, pc_memreq, pc_irefills, pc_icached, pc_dma_n,
+                 pc_pf_hits, pc_pf_fills;
 
     always_ff @(posedge clk) begin
         if (reset) begin
@@ -1037,6 +1051,8 @@ module sgi_indy #(
             pc_icached    <= '0;
             pc_arb_wait   <= '0;
             pc_dma_n      <= '0;
+            pc_pf_hits    <= '0;
+            pc_pf_fills   <= '0;
         end else begin
             pf_tlbd_q <= pf_tlbd;
             pf_tlbi_q <= pf_tlbi;
@@ -1060,6 +1076,8 @@ module sgi_indy #(
             if (cpu_perf[9])            pc_icached    <= pc_icached + 32'd1;
             if (arb_cpu_wait)           pc_arb_wait   <= pc_arb_wait + 38'd1;
             if (arb_dma_go)             pc_dma_n      <= pc_dma_n + 32'd1;
+            if (arb_pf_hit)             pc_pf_hits    <= pc_pf_hits + 32'd1;
+            if (arb_pf_fill)            pc_pf_fills   <= pc_pf_fills + 32'd1;
         end
     end
 
@@ -1077,6 +1095,9 @@ module sgi_indy #(
     // word 10's PC, the caller of a leaf routine (prof.py, profan.py). Not a
     // counter; beacon ver 13.
     assign dbg_perf_bcn[10] = { dbg_ra, dbg_rpc };
+    // w11 {instruction fills answered from ram_arb's prefetch buffer, fills
+    // that fetched the two lines after their own} (build 46, beacon ver 16).
+    assign dbg_perf_bcn[11] = { pc_pf_hits, pc_pf_fills };
 
     // VDMA beacon words (docs/design/newport-vdma.md): the MC engine, the descriptor, and the
     // Newport's view of what arrived - enough to say from the board which
@@ -1213,7 +1234,7 @@ module sgi_indy #(
     // read shift in r4300_bus lands on it whichever word was addressed.
     assign bus_rdata = (mem_hole_ack | gfx_absent_ack) ? 64'h0
                      : gfx_ack  ? gfx_rdata
-                     : cpu_ram_ack ? ram_rdata
+                     : cpu_ram_ack ? cpu_ram_rdata
                      : prom_ack ? prom_rdata
                      : gio_ack  ? gio_rdata
                      : mc_ack   ? mc_rdata

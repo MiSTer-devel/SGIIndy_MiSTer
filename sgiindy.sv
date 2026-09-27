@@ -432,7 +432,7 @@ wire        ram_req, ram_we, ram_ack, ram_last;
 wire [31:0] ram_addr;
 wire [63:0] ram_wdata, ram_rdata;
 wire  [7:0] ram_be;
-wire  [2:0] ram_burst;
+wire  [3:0] ram_burst;
 wire [191:0] ram_wdata3;    // a line write's words 1..3 (build 38)
 
 wire        prom_req, prom_ack;
@@ -482,7 +482,7 @@ wire [63:0] scsi_stat [8];  // the disk-time counters (docs/design/scsi-block-ca
 wire [63:0] hpc3_dma_bcn;   // HPC3 SCSI0 DMA channel state (docs/29)
 wire [63:0] int_bcn [2];    // interrupt-delivery diagnostics (docs/29)
 wire [63:0] vdma_bcn [4];   // VDMA / Newport pixel-DMA diagnostics (docs/design/newport-vdma.md)
-wire [63:0] perf_bcn [11];  // CPU performance counters (docs/design/cpu-speed-tlb-icache.md; w9 build 37; w10 ver 13)
+wire [63:0] perf_bcn [12];  // CPU performance counters (docs/design/cpu-speed-tlb-icache.md; w9 build 37; w10 ver 13; w11 ver 16)
 wire [63:0] audio_bcn [3];  // HAL2 and the PBUS DMA engine (docs/design/audio.md; ver 15)
 
 sgi_indy u_core
@@ -595,6 +595,9 @@ sgi_indy u_core
 	// status[20], no OSD entry either: setopt.sh dinstrict=off is build 44's
 	// DATA IN capture timing, for the A/B (docs/design/scsi-read-ready.md).
 	.scsi_din_strict  (~status[20]),
+	// status[21], no OSD entry: setopt.sh ipf=off turns ram_arb's instruction
+	// prefetch buffer off, for measuring it (build 46).
+	.ipf_enable       (~status[21]),
 
 	.dbg_scsi_bcn     (scsi_bcn),
 	.dbg_scsi_stat    (scsi_stat),
@@ -873,7 +876,9 @@ ddr3_mux u_mem
 // Word 46 (ver 15 too): the WD33C93B's DATA IN capture guard - {clocks
 // captures waited for the target's buffers, captures made while they were not
 // ready, captures forced after the wait's limit} (wd33c93.sv dbg_din).
-localparam int BCN_WORDS = 47;
+// Word 47 (ver 16, build 46): {instruction fills answered from ram_arb's
+// prefetch buffer, fills that fetched the two lines after their own}.
+localparam int BCN_WORDS = 48;
 
 // ---- DDR3 port performance counters (docs/design/cpu-speed-tlb-icache.md) ------------------------------
 // WHO HAS THE ONE PORT, AND WHO IS WAITING FOR IT. Everything the machine
@@ -933,7 +938,7 @@ reg  [31:0] bcn_addr;
 reg  [63:0] bcn_wdata;
 
 wire [63:0] bcn_src [BCN_WORDS];
-assign bcn_src[0] = { 16'hBEC0, 8'h0F, 8'h00, bcn_beat };
+assign bcn_src[0] = { 16'hBEC0, 8'h10, 8'h00, bcn_beat };
 assign bcn_src[1] = scsi_bcn[0];
 assign bcn_src[2] = scsi_bcn[1];
 assign bcn_src[3] = scsi_bcn[2];
@@ -980,6 +985,7 @@ assign bcn_src[43] = audio_bcn[0];
 assign bcn_src[44] = audio_bcn[1];
 assign bcn_src[45] = audio_bcn[2];
 assign bcn_src[46] = scsi_stat[7];
+assign bcn_src[47] = perf_bcn[11];
 
 always @(posedge clk_sys) begin
 	if (~pll_locked) begin

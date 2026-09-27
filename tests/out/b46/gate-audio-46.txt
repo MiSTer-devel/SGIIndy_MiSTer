@@ -1,0 +1,12 @@
+booting ip24prom.070-9101-011.bin with the audio fitted ...
+  ok      Running power-on diagnostics
+  ok      System Maintenance Menu
+  ok      Command Monitor.
+  ok      Audio: Iris Audio Processor: version A2 revision 4.1.0
+  audio: codec A frames 305930, DMA ops 611862, underruns 1, overruns 0, peak 32768; PBUS running 0x0, descriptors 180, words 184300
+  wav: 976474 frames at 44100 Hz to /home/dani/sgimd/tests/out/audio-prom.wav
+  tune 0 found at frame 670551 of 976474: 92150/92150 samples exact, 0 missing at the end, right channel differs from left at 0
+  TUNE CHECK PASS
+
+console output is in tests/out/audio-console.txt, the DAC in tests/out/audio-prom.wav
+AUDIO: PASS

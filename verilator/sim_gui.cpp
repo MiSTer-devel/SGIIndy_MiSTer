@@ -313,6 +313,7 @@ int main(int argc, char **argv)
     // ---- the model -------------------------------------------------------
     Vsim_top *top = new Vsim_top;
     top->reset = 1; top->sclk = 0; top->clk = 0;
+    top->ipf_en = 1;   // ram_arb's instruction prefetch buffer, as on the board
     top->boot_pc = boot_pc;
     top->mem_mb  = ram_mb;
     top->gio_present = testdev ? 1 : 0;

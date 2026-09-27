@@ -1,0 +1,14 @@
+booting ip24prom.070-9101-011.bin ...
+  ok      NVRAM checksum is incorrect
+  ok      Running power-on diagnostics
+  ok      Cannot open video() for output
+  ok      System Maintenance Menu
+  ok      5) Enter Command Monitor
+  ok      Command Monitor.
+  ok      PROM Monitor SGI Version 5.3
+  ok      Processor: 16 Mhz R4600, with FPU
+  ok      Primary I-cache size: 16 Kbytes
+  ok      Memory size: 64 Mbytes
+
+console output is in tests/out/prom-console.txt
+PROM: PASS

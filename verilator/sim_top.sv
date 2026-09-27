@@ -37,6 +37,8 @@ module sim_top
     // with it on the PROM plays its startup tune, which costs every PROM
     // regression millions of cycles of DMA it is not there to test.
     input  wire        audio_en,
+    // ram_arb's instruction prefetch buffer (build 46); --no-ipf clears it.
+    input  wire        ipf_en,
     output wire [15:0] audio_l,
     output wire [15:0] audio_r,
     output wire [63:0] audio0, audio1, audio2,
@@ -115,6 +117,7 @@ module sim_top
     output wire        dbg_retire,
     // The CPU performance counters (docs/design/cpu-speed-tlb-icache.md), printed by the harness at exit.
     output wire [63:0] perf0, perf1, perf2, perf3, perf4, perf5, perf6, perf7, perf8,
+    output wire [63:0] perf11,   // {prefetch-buffer hits, prefetching fills}
     // The instruction cache's access stream, for --itrace.
     output wire [32:0] ifetch,
     // The data cache's, for --dtrace.
@@ -123,18 +126,19 @@ module sim_top
     output wire [39:0] int2_state
 );
 
-    wire [63:0] perf_bcn [11];
+    wire [63:0] perf_bcn [12];
     assign perf0 = perf_bcn[0]; assign perf1 = perf_bcn[1];
     assign perf2 = perf_bcn[2]; assign perf3 = perf_bcn[3];
     assign perf4 = perf_bcn[4]; assign perf5 = perf_bcn[5];
     assign perf6 = perf_bcn[6]; assign perf7 = perf_bcn[7];
     assign perf8 = perf_bcn[8];
+    assign perf11 = perf_bcn[11];
 
     wire        ram_req, ram_we, ram_ack, ram_last;
     wire [31:0] ram_addr;
     wire [63:0] ram_wdata, ram_rdata;
     wire  [7:0] ram_be;
-    wire  [2:0] ram_burst;
+    wire  [3:0] ram_burst;
     wire [191:0] ram_wdata3;
 
     wire        prom_req, prom_ack;
@@ -203,6 +207,7 @@ module sim_top
         .scsi_cache_bypass(scsi_cache_bypass),
         .scsi_din_lookahead(1'b1),
         .scsi_din_strict(1'b1),
+        .ipf_enable(ipf_en),
 
         .ps2_key       (ps2_key),
         .ps2_mouse     (ps2_mouse),
@@ -338,12 +343,12 @@ module sim_top
     // burst, so a line fill that lands in the PROM is fetched word by word
     // here too.
     sim_ram u_prom (.clk(clk), .space(32'd1), .req(prom_req), .we(1'b0),
-                    .addr(prom_addr), .wdata(64'd0), .be(8'd0), .burst(3'd1), .wdata3(192'd0),
+                    .addr(prom_addr), .wdata(64'd0), .be(8'd0), .burst(4'd1), .wdata3(192'd0),
                     .rdata(prom_rdata), .ack(prom_ack), .last());
 
     sim_ram u_gio  (.clk(clk), .space(32'd2), .req(gio_req),  .we(gio_we),
                     .addr(gio_addr),  .wdata(gio_wdata), .be(gio_be),
-                    .burst(3'd1), .wdata3(192'd0),
+                    .burst(4'd1), .wdata3(192'd0),
                     .rdata(gio_rdata), .ack(gio_ack), .last());
 
     // Both frame buffer ports address the same C++ backing store, so the
@@ -351,17 +356,17 @@ module sim_top
     // way a real VRAM's two ports do.
     sim_ram u_fbw  (.clk(clk), .space(32'd3), .req(fbw_req), .we(fbw_we),
                     .addr(fbw_addr), .wdata(fbw_wdata), .be(fbw_be),
-                    .burst(3'd1), .wdata3(192'd0),
+                    .burst(4'd1), .wdata3(192'd0),
                     .rdata(fbw_rdata), .ack(fbw_ack), .last());
 
     sim_ram u_fbr  (.clk(clk), .space(32'd3), .req(fbr_req), .we(1'b0),
-                    .addr(fbr_addr), .wdata(64'd0), .be(8'd0), .burst(3'd1), .wdata3(192'd0),
+                    .addr(fbr_addr), .wdata(64'd0), .be(8'd0), .burst(4'd1), .wdata3(192'd0),
                     .rdata(fbr_rdata), .ack(fbr_ack), .last());
     // The display's second serial port, for the auxiliary plane region. On
     // MiSTer a line cache with a per-line flag table sits here; against this
     // one-cycle memory the plain read is the same picture.
     sim_ram u_fba  (.clk(clk), .space(32'd3), .req(fba_req), .we(1'b0),
-                    .addr(fba_addr), .wdata(64'd0), .be(8'd0), .burst(3'd1), .wdata3(192'd0),
+                    .addr(fba_addr), .wdata(64'd0), .be(8'd0), .burst(4'd1), .wdata3(192'd0),
                     .rdata(fba_rdata), .ack(fba_ack), .last());
 
 endmodule

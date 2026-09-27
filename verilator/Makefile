@@ -212,6 +212,14 @@ tb_scsidma:
 	   tb_scsidma.sv $(SDMA)
 	./obj_dir_tbsdma/tb_scsidma
 
+# --- ram_arb's instruction prefetch buffer against a memory with contents -----
+# Every word handed to the CPU must be what memory held, with the CPU storing
+# into the buffered lines and a DMA master writing underneath (build 46).
+#   make -C verilator tb_ipf
+tb_ipf:
+	$V --binary --timing $(TBC_W) --top-module tb_ipf --Mdir ./obj_dir_tbipf -o tb_ipf 	   tb_ipf.sv $(RTL)/sgi/ram_arb.sv
+	./obj_dir_tbipf/tb_ipf
+
 # --- sgi_memmap against a reference copy of itself ---------------------------
 # The reference is an earlier sgi_memmap.sv with its module renamed
 # sgi_memmap_ref; hit and offset must agree on every input the bench drives.

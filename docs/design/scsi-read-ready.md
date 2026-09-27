@@ -88,3 +88,33 @@ Manager opens after a root login when the CD is in the drive and took the typed
 commands (`scripts/desktop.sh` quits it), and `efsread.py` does not follow
 `/usr/tmp`'s symlink (the copy now goes to `/var/tmp`). Evidence:
 `tests/out/hw/b45b-2/`, `tests/out/hw/b45b-3/`.
+
+## The DMA engine's stop and go (build 46)
+
+A separate hazard, found looking for the stray write (a file nobody wrote,
+changed, once in eleven board sessions). `hpc3_scsi_dma.sv` took a PIO stop,
+FLUSH or ch_reset by moving its state machine directly, and against a memory
+that answers late - `verilator/tb_scsidma.sv` models ram_arb's grant and the
+DDR3 round trip; `sim_ram.v` answers in a clock or two, which is why no
+whole-machine test ever saw this - three things went wrong:
+
+* FLUSH cleared ch_active on the write, with the held bytes' memory cycle still
+  tens of clocks away. IRIX's `wd93dma_flush` (kernel.o, IP22) is `ctrl |=
+  FLUSH; while (ctrl & ACTIVE)` - ACTIVE going low is its word that the buffer
+  is complete.
+* A stop left a memory request in flight with the engine idle; a go edge then
+  took that request's acknowledge as its new descriptor's first word. With a
+  descriptor fetch in flight that is a **stray write**: the new transfer's
+  bytes landed in the abandoned descriptor's buffer.
+* A stop in the same clock as one of the engine's own transitions was
+  overridden, leaving the engine running with ch_active low.
+
+Now stop, FLUSH and ch_reset are requests the engine takes (`stop_req`): it
+lets an owed acknowledge arrive, finishes a moved byte's advance, writes the
+held bytes (not after ch_reset), then idles; a go edge waits in `go_pend` for
+that; ch_active reads 1 until a FLUSH has drained, and a go edge is not taken
+while it does (so IRIX's read-modify-write of the register cannot start a
+transfer). The bench: 26 checks and 4,000 random stop/FLUSH/go sequences, 7
+failures before, 0 after. In IRIX's own flow many WD33C93 accesses sit between
+a stop and the next go, so these windows are narrow; this is a hazard
+removed, not yet a proven cause of the stray write.

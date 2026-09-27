@@ -34,7 +34,8 @@
 //  so the display, the CPU and the rasteriser no longer wait out each other's
 //  round trips - only each other's words, and the display's words come in
 //  short sub-bursts. See `rf_*` and `fbr_*` below. The CPU's CACHE LINE FILLS
-//  ARE BURSTS: `ram_burst` asks for 1..4 consecutive words and the port
+//  ARE BURSTS: `ram_burst` asks for 1..4 consecutive words (12 when ram_arb's
+//  instruction prefetch fetches a line and the two after it) and the port
 //  answers with one `ram_ack` per word, `ram_last` on the final one. Measured
 //  on the board before that existed (docs/39), a line fill was one full round
 //  trip PER WORD - 36 cycles for a 16-byte data line, ~72 for a 32-byte
@@ -123,7 +124,7 @@ module ddr3_mux #(
     input  logic  [7:0] ram_be,
     // Words per READ, 1..4 (0 reads as 1; a write is always one word). Held
     // with the rest of the payload until the transaction is taken.
-    input  logic  [2:0] ram_burst,
+    input  logic  [3:0] ram_burst,
     // A LINE WRITE (build 38): ram_we with ram_burst = 4 writes ram_wdata at
     // ram_addr and ram_wdata3's three words at the next three, acknowledged
     // once, with ram_last. See the take branch below.
@@ -207,7 +208,7 @@ module ddr3_mux #(
     logic [24:0]            p_addr [NM];   // already a DDR3 word address
     logic [63:0]            p_wdata[NM];
     logic  [7:0]            p_be   [NM];
-    logic  [2:0]            p_rburst;     // the CPU's, 1..4
+    logic  [3:0]            p_rburst;     // the CPU's, 1..4, or 12 (ram_arb's prefetching fill)
     logic                   p_wline;      // the CPU's write is a 4-word line
     logic [191:0]           p_wdata3;     // ...and these are its words 1..3
 
@@ -317,7 +318,7 @@ module ddr3_mux #(
                       && !(rq_seen[M_RAM] && ack_q[M_RAM]
                            && rq_we[M_RAM] == p_we[M_RAM]
                            && rq_addr[M_RAM] == p_addr[M_RAM]);
-    wire [2:0] rq_rburst = (ram_we || ram_burst == 3'd0) ? 3'd1 : ram_burst;
+    wire [3:0] rq_rburst = (ram_we || ram_burst == 4'd0) ? 4'd1 : ram_burst;
 
     always_comb begin
         cand = pend & ~busy_m;
@@ -567,8 +568,8 @@ module ddr3_mux #(
                         pend[i] <= 1'b1;
                     end
                     if (i == M_RAM) begin
-                        p_rburst <= (ram_we || ram_burst == 3'd0) ? 3'd1 : ram_burst;
-                        p_wline  <= ram_we && (ram_burst == 3'd4);
+                        p_rburst <= (ram_we || ram_burst == 4'd0) ? 4'd1 : ram_burst;
+                        p_wline  <= ram_we && (ram_burst == 4'd4);
                         p_wdata3 <= ram_wdata3;
                     end
                     p_we[i]    <= rq_we[i];
@@ -670,16 +671,16 @@ module ddr3_mux #(
                     fbr_isl        <= fbr_isl - fbr_n;
                 end else begin
                     cmd_n          <= (pick == $clog2(NM)'(M_RAM))
-                                      ? {5'b0, ram_now ? rq_rburst : p_rburst} : 8'd1;
+                                      ? {4'b0, ram_now ? rq_rburst : p_rburst} : 8'd1;
                     DDRAM_ADDR     <= {REGION, ram_now ? rq_addr[M_RAM] : p_addr[pick]};
                     DDRAM_BURSTCNT <= (pick == $clog2(NM)'(M_RAM))
-                                      ? {5'b0, ram_now ? rq_rburst : p_rburst} : 8'd1;
+                                      ? {4'b0, ram_now ? rq_rburst : p_rburst} : 8'd1;
                     DDRAM_DIN      <= ram_now ? ram_wdata : p_wdata[pick];
                     DDRAM_BE       <= pick_we ? (ram_now ? ram_be : p_be[pick]) : 8'hFF;
                     pend[pick]     <= 1'b0;
                     busy_m[pick]   <= 1'b1;
                     wl_left        <= (pick == $clog2(NM)'(M_RAM) && pick_we
-                                       && (ram_now ? (ram_burst == 3'd4) : p_wline))
+                                       && (ram_now ? (ram_burst == 4'd4) : p_wline))
                                       ? 2'd3 : 2'd0;
                     wl_data        <= ram_now ? ram_wdata3 : p_wdata3;
                     wl_addr        <= (ram_now ? rq_addr[M_RAM] : p_addr[M_RAM]) + 25'd1;
