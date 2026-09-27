@@ -418,7 +418,8 @@ initial begin
     end
 
     $display("tb_scsidma: %0d checks, %0d failed", checks, fails);
-    $display(fails == 0 ? "SCSIDMA: PASS" : "SCSIDMA: FAIL");
+    if (fails == 0) $display("SCSIDMA: PASS");
+    else $display("SCSIDMA: FAIL");
     $finish;
 end
 

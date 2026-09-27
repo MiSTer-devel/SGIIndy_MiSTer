@@ -112,9 +112,9 @@ module sgi_memmap #(
     // construct that works everywhere except the one tool you need.
     logic        vld   [4];
     logic [31:0] base  [4];
-    logic [31:0] limit [4];
     logic [31:0] amask [4];
     logic        bhit  [4];
+    logic  [9:0] off_hi [4];
 
     // EXPLICIT generate/genvar, not `for (genvar b = ...)`. The inline form is
     // SystemVerilog that Verilator takes and Quartus 17.0 does not - it stops
@@ -123,16 +123,30 @@ module sgi_memmap #(
     genvar b;
     generate
     for (b = 0; b < 4; b++) begin : g_bank
-        // (MSIZE + 1) * 4 MB, halved when the SIMM carries two subbanks.
-        wire [31:0] conf = ({27'b0, half[b][12:8]} + 32'd1) << 22;
+        // (MSIZE + 1) * 4 MB, halved when the SIMM carries two subbanks - in
+        // 2 MB units, which is the finest a limit comes in.
+        wire [6:0] units = half[b][14] ? ({2'b00, half[b][12:8]} + 7'd1)
+                                       : ({2'b00, half[b][12:8]} + 7'd1) << 1;
         assign vld[b]   = half[b][13] && (bank_mb[b] != 32'd0);
         assign base[b]  = {2'b00, half[b][7:0], 22'b0};
-        assign limit[b] = half[b][14] ? (conf >> 1) : conf;
         // The installed SIMMs wrap within their own size, which is how the
         // PROM's alias probe measures them: configure the bank larger than it
         // is and the pattern written high reappears low.
         assign amask[b] = (bank_mb[b] * 32'd1048576) - 32'd1;
-        assign bhit[b]  = vld[b] && (addr >= base[b]) && ((addr - base[b]) < limit[b]);
+        // ONLY addr[31:21] TAKES PART IN ANY ARITHMETIC (build 45b). A base is
+        // 4 MB aligned and a limit a whole number of 2 MB, so `addr >= base`
+        // is a compare of addr[31:22], `addr - base < limit` a subtract and a
+        // compare of addr[31:21], and neither can borrow out of the bits below.
+        // The 32-bit forms of the same expressions were on the CPU's path into
+        // ddr3_mux, the core clock's second-worst family in build 45's fit.
+        wire [10:0] d21 = addr[31:21] - {base[b][31:22], 1'b0};
+        assign bhit[b]  = vld[b] && (addr[31:22] >= base[b][31:22])
+                                 && (d21 < {4'b0, units});
+        // The offset the same way: bank_off and base have nothing below bit 22
+        // and amask nothing above bit 25, so bits 21:0 are addr's own and the
+        // rest is a four-bit subtract into a ten-bit add.
+        wire  [3:0] m4 = (addr[25:22] - base[b][25:22]) & amask[b][25:22];
+        assign off_hi[b] = bank_off[b][31:22] + {6'b0, m4};
     end
     endgenerate
 
@@ -145,7 +159,7 @@ module sgi_memmap #(
         for (int b = 3; b >= 0; b--) begin
             if (bhit[b]) begin
                 hit    = 1'b1;
-                offset = bank_off[b] + ((addr - base[b]) & amask[b]);
+                offset = {off_hi[b], addr[21:0]};
             end
         end
     end

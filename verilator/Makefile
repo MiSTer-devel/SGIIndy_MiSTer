@@ -212,6 +212,18 @@ tb_scsidma:
 	   tb_scsidma.sv $(SDMA)
 	./obj_dir_tbsdma/tb_scsidma
 
+# --- sgi_memmap against a reference copy of itself ---------------------------
+# The reference is an earlier sgi_memmap.sv with its module renamed
+# sgi_memmap_ref; hit and offset must agree on every input the bench drives.
+# Build 45b's rewrite was checked against the 32-bit original (24.8 million
+# comparisons, 0 mismatches):
+#   git show 2621a80:rtl/sgi/sgi_memmap.sv | sed 's/module sgi_memmap/module sgi_memmap_ref/' > /tmp/sgi_memmap_ref.sv
+#   make -C verilator tb_memmap MEMMAP_REF=/tmp/sgi_memmap_ref.sv
+MEMMAP ?= $(RTL)/sgi/sgi_memmap.sv
+tb_memmap:
+	$V --binary --timing $(TBC_W) --top-module tb_memmap --Mdir ./obj_dir_tbmm -o tb_memmap 	   tb_memmap.sv $(MEMMAP) $(MEMMAP_REF)
+	./obj_dir_tbmm/tb_memmap
+
 
 # The bench in the shape sgi_scsi.sv instantiates since build 27: the CD slot
 # cached with a 64-sector window and multi-block on (CACHE_CD = 1, SECT2 = 64,

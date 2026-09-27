@@ -466,6 +466,31 @@ module sgi_indy #(
     logic [31:0] mcd_addr;
     logic [63:0] mcd_wdata;
     logic  [7:0] mcd_be;
+    // The engine's own request, before the register below: its address is a
+    // µTLB compare and an add away from mc_gio_dma's state, and that path into
+    // ddr3_mux's request registers was the core clock's worst in every fit
+    // since build 44 - 286 of the 300 worst endpoints of build 45's (-0.927
+    // ns, TNS -102 once audio's PBUS master was on the port).
+    logic        mce_req, mce_we;
+    logic [31:0] mce_addr;
+    logic [63:0] mce_wdata;
+    logic  [7:0] mce_be;
+
+    // ONE REGISTER BETWEEN THE MC ENGINE AND THE PORT (build 45b). The engine
+    // holds a request, unchanged, until its acknowledge, and only moves on
+    // after it - so the copy here is that same request one clock later, and
+    // it must drop in the clock after the acknowledge, when the engine's
+    // registers first show it: the acknowledge gates the copy, or the held
+    // request would go out twice. A beat costs one clock of latency and one
+    // bubble; nothing waits on this engine but itself (memory clears, VDMA).
+    always_ff @(posedge clk) begin
+        if (reset) mcd_req <= 1'b0;
+        else       mcd_req <= mce_req && !mcd_ack;
+        mcd_we    <= mce_we;
+        mcd_addr  <= mce_addr;
+        mcd_wdata <= mce_wdata;
+        mcd_be    <= mce_be;
+    end
 
     // The engine's GIO-side master: one 64-bit beat per transaction, routed
     // to the Newport's DMA port. IRIX's ng1 always aims it at REX3's HOSTRW
@@ -498,7 +523,10 @@ module sgi_indy #(
     logic        scsi_dma_irq;
 
     assign sel_alias = (bus_addr < ALIAS_SIZE);
-    assign mem_addr  = sel_alias ? (bus_addr + RAM_BASE) : bus_addr;
+    // An OR, not an add: an aliased address is below 512 KB, so RAM_BASE's one
+    // bit is always clear in it and the two are the same - without a carry
+    // chain on the CPU's path into the memory port (build 45b).
+    assign mem_addr  = sel_alias ? (bus_addr | RAM_BASE) : bus_addr;
     assign sel_ram   = sel_alias
                      || ((bus_addr >= RAM_BASE)   && (bus_addr < LOMEM_END))
                      || ((bus_addr >= HIMEM_BASE) && (bus_addr < HIMEM_END));
@@ -673,11 +701,11 @@ module sgi_indy #(
         .memcfg0 (mc_memcfg0),
         .memcfg1 (mc_memcfg1),
 
-        .dma_m_req   (mcd_req),
-        .dma_m_we    (mcd_we),
-        .dma_m_addr  (mcd_addr),
-        .dma_m_wdata (mcd_wdata),
-        .dma_m_be    (mcd_be),
+        .dma_m_req   (mce_req),
+        .dma_m_we    (mce_we),
+        .dma_m_addr  (mce_addr),
+        .dma_m_wdata (mce_wdata),
+        .dma_m_be    (mce_be),
         .dma_m_rdata (dma_rdata),
         .dma_m_ack   (mcd_ack),
 
