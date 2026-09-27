@@ -1,0 +1,21 @@
+status = 0x00000000000000000000000000000000
+[14:21:49] restoring /media/fat/games/SGIIndy/SGIIndy53.img from /media/fat/games/SGIIndy/SGIIndy53-audio.img
+[14:26:25] launching 64cdbdc3f39bbf900b545906c66936b8
+[14:26:59] PROM: 14:27:00 audio: frames=1339674 ops=2679350 underruns=1 overruns=0 peak=32768 last=0 | pbus running=0x0 int=0x0 descriptors=180 words=184300
+[14:27:21] UNKNOWN    panicstr=0x00000000 panel9  0.0% idx16  0.0% indices 168 marker  0.2% 
+[14:27:42] BOOTING    panicstr=0x00000000 panel9 12.1% idx16  0.0% indices 168 marker  0.1% 
+[14:28:03] BOOTING    panicstr=0x00000000 panel9 12.1% idx16  0.0% indices 168 marker  0.1% 
+[14:28:24] UNKNOWN    panicstr=0x00000000 panel9  0.0% idx16  0.0% indices   1 marker  0.0% 
+[14:28:45] X-UP       panicstr=0x00000000 panel9  0.0% idx16 22.2% indices 166 marker  0.0% 
+[14:28:57] login screen: 14:28:58 audio: frames=6912065 ops=18446877 underruns=1 overruns=0 peak=32768 last=0 | pbus running=0x0 int=0x0 descriptors=182 words=184304
+[14:28:57] login screen: 0 words in 10 s, channels 0x0
+[14:29:13] logging in as root
+[14:31:24] logged in:    14:31:25 audio: frames=13984802 ops=39665088 underruns=1 overruns=0 peak=32768 last=0 | pbus running=0x0 int=0x0 descriptors=184 words=184308
+[14:31:25] playing /usr/share/data/sounds/prosonus/sfx/alarm_clock.aiff
+[14:31:53] while playing: 496930 words moved; 150 samples, 28 with a channel running, 27 with a nonzero sample
+[14:31:53] AUDIO PLAYED
+[14:31:53] halting
+[14:32:07] UNKNOWN    panicstr=0x00000000 panel9  0.0% idx16  0.0% indices 168 marker  0.2% 
+[14:32:07] after halt:   14:32:08 audio: frames=15914336 ops=45584533 underruns=1 overruns=0 peak=32768 last=0 | pbus running=0x0 int=0x0 descriptors=1419 words=681238
+[14:32:07] HALT: X LEFT THE SCREEN
+[14:32:07] done -> tests/out/hw/audioprobe-b45b-4.log

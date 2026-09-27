@@ -145,9 +145,10 @@ Measured by `quartus_map` on `sgi_hpc3` alone: HAL2 976 ALUTs, 893 registers
 and 4 DSP blocks; the PBUS engine 723 ALUTs and 508 registers. The fit's own
 numbers are in `reports/summary.md` for the build that carries it.
 
-Memory bandwidth: IRIX keeps codec A, codec B and AES TX running at 48 kHz
-stereo whenever `kdsp_a2` is loaded, even in silence - about 144,000 memory
-transactions a second through the DMA port, all single doublewords.
+Memory bandwidth: while a sound plays, codec A and AES TX each move a stereo
+frame per 48 kHz tick - ~96,000 memory transactions a second through the DMA
+port (a frame is one doubleword). On the board IRIX 5.3's `kdsp_a2` starts its
+rings when something plays and not at boot: nothing moves at the login screen.
 
 ## Tests
 
@@ -170,6 +171,36 @@ transactions a second through the DMA port, all single doublewords.
   `Audio: Iris Audio Processor: version A2 revision 4.1.0`.
 * On the board: `bcnread.py --audio` (beacon words 43-45, version 15) shows
   frames played, DMA operations, under/overruns and the peak sample.
+
+## On the board (build 45b, 2026-09-27)
+
+Commit 6fd7ffc, rbf md5 `64cdbdc3f39bbf900b545906c66936b8`, board .92:
+
+* **The PROM's tune** goes through the PBUS DMA and HAL2 on every launch:
+  182 descriptors, 184,304 words, the DAC at full scale, then both channels
+  idle (one underrun, at the start).
+* **THE RELEASE IMAGES' KERNEL HAS NO AUDIO DRIVER.** `/unix` on
+  `SGIIndy53-pristine.img` carries 11,000 symbols and not one `hal2_*`: lboot
+  links `kdsp_a2` only when `audio.sm`'s `exprobe` of HAL2's revision passes,
+  and those kernels were linked on cores whose HAL2 read absent. So an
+  existing image needs, once, as root: **`/etc/autoconfig -f`, then reboot**
+  (`scripts/audioprobe.sh --autoconfig` does it; the result is kept on the
+  board as `SGIIndy53-audio.img`). A fresh install on an audio core links it
+  from the start.
+* **IRIX then plays.** `playaiff alarm_clock.aiff` under the relinked kernel,
+  sampled on the board at 10 Hz: codec A and AES TX running (channels `0x9`)
+  for ~2.7 s, 496,930 words at ~178,000 words/s against 192,000 expected
+  for 48 kHz stereo on two channels (the sampler's interval runs a little
+  over 0.1 s), 27 samples of waveform (-4193 .. +5823) decaying to 0, then
+  idle. `init 0` afterwards takes X off the screen - the old `kdsp_a2` hang
+  does not return. Evidence: `tests/out/hw/audioprobe-b45b-4*`,
+  `tests/out/hw/b45b-3/`.
+* Not yet measured: whether it sounds right to a listener, codec B input,
+  and the audio panel's volume path.
+
+The first probe of this build proved nothing about IRIX: Software Manager,
+which opens after a root login when the CD is in the drive, took the typed
+`playaiff` and `init 0` (`scripts/desktop.sh` now quits it).
 
 ## Tools
 

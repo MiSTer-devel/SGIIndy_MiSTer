@@ -1,0 +1,9 @@
+[14:26:25] launching 64cdbdc3f39bbf900b545906c66936b8
+[14:26:59] PROM: 14:27:00 audio: frames=1339674 ops=2679350 underruns=1 overruns=0 peak=32768 last=0 | pbus running=0x0 int=0x0 descriptors=180 words=184300
+[14:28:57] login screen: 14:28:58 audio: frames=6912065 ops=18446877 underruns=1 overruns=0 peak=32768 last=0 | pbus running=0x0 int=0x0 descriptors=182 words=184304
+[14:28:57] login screen: 0 words in 10 s, channels 0x0
+[14:31:24] logged in:    14:31:25 audio: frames=13984802 ops=39665088 underruns=1 overruns=0 peak=32768 last=0 | pbus running=0x0 int=0x0 descriptors=184 words=184308
+[14:31:53] while playing: 496930 words moved; 150 samples, 28 with a channel running, 27 with a nonzero sample
+[14:31:53] AUDIO PLAYED
+[14:32:07] after halt:   14:32:08 audio: frames=15914336 ops=45584533 underruns=1 overruns=0 peak=32768 last=0 | pbus running=0x0 int=0x0 descriptors=1419 words=681238
+[14:32:07] HALT: X LEFT THE SCREEN
