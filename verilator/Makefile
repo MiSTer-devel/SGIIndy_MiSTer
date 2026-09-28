@@ -412,6 +412,17 @@ ramarbtest:
 	   --x-assign fast --x-initial fast --noassert \
 	   -o Vram_arb $(RTL)/sgi/ram_arb.sv tb_ramarb.cpp
 
+# The prefetch buffers (builds 46, 47) against the same slow memory: every
+# word a line fill is given checked against memory, under random stores, line
+# writes and DMA writes into the lines they hold (tb_ramarb_pf.cpp's header).
+#   make ramarbpftest && LAT=20 SEED=3 ./obj_dir_ramarbpf/Vram_arb
+ramarbpftest:
+	$V -cc --exe --build --build-jobs 0 --verilate-jobs 1 --Mdir ./obj_dir_ramarbpf --top-module ram_arb \
+	   -O3 -CFLAGS "-O2 -std=c++17 -I.." $(CPUTEST_W) \
+	   --x-assign fast --x-initial fast --noassert \
+	   -o Vram_arb $(RTL)/sgi/ram_arb.sv tb_ramarb_pf.cpp
+	./obj_dir_ramarbpf/Vram_arb
+
 # -Wno-LATCH: the round-robin pick declares its candidate inside the for loop
 # of an always_comb, which Verilator 5.020 reads as a latch; WM_W carries the
 # same waiver for the whole machine.
