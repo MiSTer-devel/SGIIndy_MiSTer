@@ -1,0 +1,47 @@
+perf-scroll.bin: 8434 samples over 8.4 s (1000 Hz), 8434 distinct beacon sweeps
+  idle 42.7 %   kernel 22.1 %   user 35.2 %
+  of the busy time: running 25.3 %, fetch-stalled 33.4 %, exec-stalled 30.5 %, writeback-stalled 10.7 %, decode 0.0 %; TLB walk bits set in 0.8 % of all samples
+  busy time by stage and TLB walk (tlbi = instruction walk, tlbd = data walk): fetch-stall/tlbi 0.5 %, fetch-stall/other 32.9 %, exec-stall/tlbd 0.9 %, exec-stall/other 29.7 %, wb-stall/other 10.7 %, run/other 25.3 %
+
+  top places (share of all samples; how that place spent it)
+   42.7 %  idle   (idle)                             run  83  fetch   0  exec  17  wb   0
+   22.1 %  kernel ?k                                 run  27  fetch  43  exec  18  wb  12
+   21.0 %  user   (user 10000000)                    run  13  fetch  29  exec  47  wb  11
+    9.6 %  user   (user 5ff00000)                    run  36  fetch  27  exec  28  wb   9
+    1.9 %  user   (program text f520000)             run  72  fetch  10  exec  12  wb   6
+    1.5 %  user   (program text 0400000)             run  33  fetch  38  exec  19  wb  10
+    0.5 %  user   (program text f550000)             run  38  fetch  33  exec  26  wb   3
+    0.4 %  user   (user 10100000)                    run  30  fetch  27  exec  30  wb  12
+    0.1 %  user   (user 7fc00000)                    run  88  fetch   0  exec  12  wb   0
+    0.1 %  user   (program text f530000)             run  43  fetch  14  exec  43  wb   0
+    0.1 %  user   (program text f540000)             run   0  fetch  20  exec  80  wb   0
+    0.0 %  user   (program text f8b0000)             run  25  fetch  50  exec   0  wb  25
+    0.0 %  user   (program text f560000)             run   0  fetch  50  exec  50  wb   0
+    0.0 %  user   (program text 0530000)             run 100  fetch   0  exec   0  wb   0
+
+  callers of the top kernel places (register 31 beside the PC, beacon ver 13)
+   22.1 %  ?k                       <- ?k 86%, (user 10000000) 6%, (user 5ff00000) 3%, (program text 0400000) 2%
+
+  VDMA beats into REX3: write 0, read 0;  display line-cache misses: rgb 0, aux 0
+
+  performance counters over the window (beacon ver 17):
+    window 8.4 s wall (421850002 clocks at 50 MHz), beacon beats 134515
+    CPU: 208.80 M instructions, 2.02 clocks/instruction, 24.75 MIPS
+      clocks: advancing 49.6 %, fetch held 19.9 %, execute held 24.7 %, writeback held 18.8 %, in a TLB walk 0.8 %
+      I-cache fills 2920303 (13.99 per 1000 instructions), 13.0 clocks each on the bus
+      D-cache fills 997127 (4.78 per 1000), 18.9 clocks each on the bus; writeback beats 1766948 (441737.0 lines)
+      I-cache fills asked for after an instruction TLB walk 573011 (2.74 per 1000), answered from a line already held 449390 (78.4 %) - no DDR3 trip
+      TLB walks: instruction 589764 (2.82 per 1000), data 1107848 (5.31 per 1000), 1.9 clocks per walk
+      uncached fetches 3056; bus transactions 4835688, 27.4 clocks each on the bus
+    DDR3 port: display held it 73.8 %, RAM 12.3 %, rasteriser 3.7 %, others 1.6 %
+      RAM: 4320191 transactions, 12.0 clocks held and 0.0 clocks queued per transaction
+      rasteriser: 15085132 transactions, 1.0 clocks held and 1.1 clocks queued each
+      RAM reads: 2528292, 10.9 clocks from the bridge taking one to its first word, behind 4.2 words owed to earlier reads; 0.02 clocks of gaps inside a burst
+      the bridge alone (reads taken with nothing owed): 1947261 reads, 9.5 clocks to the first word
+      CPU accesses held behind a DMA transaction: 0.00 s in all; DMA transactions 24598
+      reads: 42391760, 3.2 clocks from issue to the first word; display bursts 39813551; 0.0 clocks waiting on DDRAM_BUSY per transaction
+  disk over the window: hps xact rd 116 wr 6, target wait 0.03 s, DATA 0.04 s for 0.19 MB, cache hits 326 misses 31
+  DATA IN waiting on the initiator 0.02 s, on the target 0.02 s; DATA OUT on the initiator 0.00 s, on the target 0.00 s
+
+  time series (10 s buckets): idle / kernel / user %, and of busy: run / fetch / exec %
+       0 s  idle  42.7  kern  22.1  user  35.2 | run  25.3  fetch  33.4  exec  30.5

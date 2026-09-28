@@ -531,3 +531,54 @@ dirty lines, ~3 %); the line's own ~9 clocks then only delay a request issued
 while it is draining. A posted line write in ram_arb (acknowledged when
 latched, the next read allowed past it with an address check) would hide the
 rest and is the step after.
+
+### Build 48 on the board
+
+Build 48 (bedb278) = build 47 + the two changes above. On m900, seeds 1 and 3
+missed the core clock (-0.285, -0.185 ns) and **seed 5 met it** (core +0.080,
+HDMI +0.061, 37,228 ALMs, 89 %), `output_files/sgiindy-b48-seed5-m900.rbf`, md5
+`5524edcc14752687edea483705d379b3`. Seed 5's worst 300 core-clock endpoints
+(tests/out/hw/b48/pathfamilies-seed5.txt) are REX3 -> `p_wdata` and
+`sgi_memmap` -> `ddr3_mux` - the families that decide every fit - and **no CPU
+path**, so the misses were placement, not the new scheduler order.
+
+cpu-tests as the PROM **2415 / 0**. The benches, Count ticks per load:
+
+| walk | build 47 | **build 48** |
+|---|---:|---:|
+| `ld_miss` (a stream) | 9 | 9 |
+| `ld_miss64` | 12.2 | 12.2 |
+| `ld_miss_dirty` | 18.1 | **14.1** |
+| `ld_miss_dirty64` | 21.7 | **17.5** |
+
+**A dirty victim now costs 5.3 ticks, 10.6 clocks, against 19**: the fill is
+taken before the line, and what is left is the victim's readout (7 clocks)
+and the line's write going ahead of whatever the CPU asks for next. Clean
+misses did not move.
+
+`scripts/perfprobe.sh` on the pristine image, build 47's release bitstream run
+as the same-night control at 23:15 and build 48 at 23:49:
+
+| workload | build 47 | **build 48** | |
+|---|---:|---:|---:|
+| launch to the X login screen | 80 s | 79 s | |
+| 60 x `/bin/ls /` | 3.50 s | **3.35 s** | 1.04x |
+| `ls -lR /usr/lib/X11` into the Console | 5.35 s | **5.15 s** | 1.04x |
+| `xterm -e /bin/true`, cold / warm | 0.644 / 0.373 s | 0.635 / 0.366 s | 1.01 / 1.02x |
+| bzip2 -9 of /unix | 80.69 s | 80.41 s | 1.00x |
+| dd 10 MB off the raw disk | 2.59 s | 2.57 s | |
+| perl loop | 11.42 s | 12.55 s | (see below) |
+| clocks per instruction, fork / scroll / bzip2 | 1.70 / 2.02 / 1.94 | 1.66 / 1.98 / 1.94 | |
+| D-cache fill, clocks on the bus (boot / fork / bzip2) | 18.3 / 18.1 / 18.7 | 18.0 / 17.8 / 18.4 | |
+
+The perl row is section 6's instruction-cache placement lottery again: build
+48's run took **18.2 instruction fills per 1000 instructions** against the
+control's 7.5 (and 15.3 in both of build 47's earlier runs), with fewer data
+fills than the control; nothing build 48 changed touches an instruction fill.
+The gain is where data misses write back - fork, the Console's scrolling -
+and small where they do not.
+
+The rest of the board run, same bitstream: the CD file identical to the ISO;
+IRIX plays audio and halts cleanly; `diskcheck` PASS; `diskstress` PASS.
+Released as **`releases/SGIIndy_20260927.rbf`**. Evidence: tests/out/hw/b48/,
+tests/out/hw/b47ctl/, tests/out/hw/perf-b48/, tests/out/hw/perf-b47ctl/.

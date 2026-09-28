@@ -1,0 +1,56 @@
+perf-bzip2.bin: 83164 samples over 83.2 s (999 Hz), 83164 distinct beacon sweeps
+  idle 4.3 %   kernel 31.6 %   user 64.1 %
+  of the busy time: running 50.6 %, fetch-stalled 13.4 %, exec-stalled 24.6 %, writeback-stalled 11.4 %, decode 0.0 %; TLB walk bits set in 4.3 % of all samples
+  busy time by stage and TLB walk (tlbi = instruction walk, tlbd = data walk): fetch-stall/tlbi 0.6 %, fetch-stall/other 12.7 %, exec-stall/tlbd 3.9 %, exec-stall/other 20.7 %, wb-stall/other 11.4 %, run/other 50.6 %
+
+  top places (share of all samples; how that place spent it)
+   62.8 %  user   (program text 0440000)             run  57  fetch   4  exec  27  wb  12
+   31.6 %  kernel ?k                                 run  38  fetch  31  exec  20  wb  10
+    4.3 %  idle   (idle)                             run  82  fetch   0  exec  18  wb   0
+    0.5 %  user   (program text 0410000)             run  39  fetch  41  exec  16  wb   4
+    0.5 %  user   (user 5ff00000)                    run  34  fetch  30  exec  13  wb  23
+    0.1 %  user   (program text 0420000)             run  47  fetch   6  exec  18  wb  28
+    0.0 %  user   (program text f990000)             run  80  fetch  20  exec   0  wb   0
+    0.0 %  user   (program text 0400000)             run  67  fetch  29  exec   5  wb   0
+    0.0 %  user   (program text f8b0000)             run  69  fetch  12  exec   6  wb  12
+    0.0 %  user   (program text fb60000)             run   9  fetch  73  exec   9  wb   9
+    0.0 %  user   (user 10000000)                    run   0  fetch  14  exec  57  wb  29
+    0.0 %  user   (user 7fc00000)                    run  20  fetch  40  exec  40  wb   0
+    0.0 %  user   (program text fb70000)             run  25  fetch  50  exec  25  wb   0
+    0.0 %  user   (program text fb80000)             run 100  fetch   0  exec   0  wb   0
+    0.0 %  user   (program text 0470000)             run   0  fetch 100  exec   0  wb   0
+
+  callers of the top kernel places (register 31 beside the PC, beacon ver 13)
+   31.6 %  ?k                       <- (program text 0440000) 52%, ?k 48%, (user 5ff00000) 0%, (user 7fc00000) 0%
+
+  VDMA beats into REX3: write 0, read 0;  display line-cache misses: rgb 0, aux 0
+
+  performance counters over the window (beacon ver 17):
+    window 83.2 s wall (4160699999 clocks at 50 MHz), beacon beats 1326756
+    CPU: 2149.68 M instructions, 1.94 clocks/instruction, 25.83 MIPS
+      clocks: advancing 52.3 %, fetch held 12.6 %, execute held 24.6 %, writeback held 22.3 %, in a TLB walk 4.3 %
+      I-cache fills 18276623 (8.50 per 1000 instructions), 13.7 clocks each on the bus
+      D-cache fills 34574564 (16.08 per 1000), 18.4 clocks each on the bus; writeback beats 58776744 (14694186.0 lines)
+      I-cache fills asked for after an instruction TLB walk 15342735 (7.14 per 1000), answered from a line already held 14607954 (95.2 %) - no DDR3 trip
+      TLB walks: instruction 15591815 (7.25 per 1000), data 81383215 (37.86 per 1000), 1.9 clocks per walk
+      uncached fetches 499668; bus transactions 68272644, 14.9 clocks each on the bus
+    DDR3 port: display held it 74.1 %, RAM 19.5 %, rasteriser 0.0 %, others 1.6 %
+      RAM: 103846503 transactions, 7.8 clocks held and 0.0 clocks queued per transaction
+      rasteriser: 20282 transactions, 1.0 clocks held and 1.1 clocks queued each
+      RAM reads: 44756399, 10.7 clocks from the bridge taking one to its first word, behind 4.1 words owed to earlier reads; 0.01 clocks of gaps inside a burst
+      the bridge alone (reads taken with nothing owed): 31328163 reads, 9.8 clocks to the first word
+      CPU accesses held behind a DMA transaction: 0.10 s in all; DMA transactions 508789
+      reads: 437413253, 3.1 clocks from issue to the first word; display bursts 392656854; 0.0 clocks waiting on DDRAM_BUSY per transaction
+  disk over the window: hps xact rd 630 wr 419, target wait 1.74 s, DATA 1.92 s for 4.02 MB, cache hits 4703 misses 89
+  DATA IN waiting on the initiator 0.28 s, on the target 0.14 s; DATA OUT on the initiator 0.20 s, on the target 1.22 s
+
+  time series (10 s buckets): idle / kernel / user %, and of busy: run / fetch / exec %
+       0 s  idle   0.0  kern  50.5  user  49.5 | run  41.0  fetch  16.4  exec  31.2
+      10 s  idle   0.0  kern  44.5  user  55.5 | run  46.0  fetch  18.1  exec  25.6
+      20 s  idle   0.0  kern  28.3  user  71.7 | run  55.2  fetch  10.6  exec  24.3
+      30 s  idle   0.0  kern  45.5  user  54.5 | run  42.6  fetch  18.0  exec  27.1
+      40 s  idle   0.0  kern  25.3  user  74.7 | run  55.4  fetch  13.5  exec  22.1
+      50 s  idle   0.0  kern  30.9  user  69.1 | run  50.1  fetch  11.1  exec  25.4
+      60 s  idle   0.0  kern  22.3  user  77.7 | run  54.5  fetch  10.7  exec  23.2
+      70 s  idle   4.1  kern  15.2  user  80.7 | run  60.9  fetch   8.3  exec  17.6
+      80 s  idle  99.4  kern   0.6  user   0.0 | run  47.4  fetch  10.5  exec  26.3

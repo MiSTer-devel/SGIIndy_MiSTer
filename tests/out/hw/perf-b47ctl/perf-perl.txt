@@ -1,0 +1,44 @@
+perf-perl.bin: 14236 samples over 14.2 s (999 Hz), 14236 distinct beacon sweeps
+  idle 25.3 %   kernel 1.9 %   user 72.8 %
+  of the busy time: running 36.0 %, fetch-stalled 21.4 %, exec-stalled 36.0 %, writeback-stalled 6.5 %, decode 0.0 %; TLB walk bits set in 8.7 % of all samples
+  busy time by stage and TLB walk (tlbi = instruction walk, tlbd = data walk): fetch-stall/tlbi 2.6 %, fetch-stall/other 18.8 %, exec-stall/tlbd 9.1 %, exec-stall/other 26.9 %, wb-stall/other 6.5 %, run/other 36.0 %
+
+  top places (share of all samples; how that place spent it)
+   46.3 %  user   (program text 0420000)             run  37  fetch  14  exec  41  wb   9
+   25.3 %  idle   (idle)                             run  82  fetch   0  exec  18  wb   0
+   18.3 %  user   (program text 0450000)             run  37  fetch  27  exec  35  wb   1
+    8.2 %  user   (program text 0470000)             run  33  fetch  47  exec  13  wb   7
+    1.9 %  kernel ?k                                 run  27  fetch  38  exec  26  wb   9
+    0.0 %  user   (user 5ff00000)                    run  25  fetch  50  exec  25  wb   0
+    0.0 %  user   (program text 0400000)             run 100  fetch   0  exec   0  wb   0
+    0.0 %  user   (program text 0530000)             run  50  fetch  50  exec   0  wb   0
+    0.0 %  user   (user 10000000)                    run   0  fetch 100  exec   0  wb   0
+    0.0 %  user   (program text 0480000)             run   0  fetch   0  exec 100  wb   0
+
+  callers of the top kernel places (register 31 beside the PC, beacon ver 13)
+    1.9 %  ?k                       <- ?k 84%, (program text 0470000) 9%, (idle) 4%, (program text 0420000) 3%
+
+  VDMA beats into REX3: write 0, read 0;  display line-cache misses: rgb 0, aux 0
+
+  performance counters over the window (beacon ver 17):
+    window 14.2 s wall (712449992 clocks at 50 MHz), beacon beats 227170
+    CPU: 339.99 M instructions, 2.10 clocks/instruction, 23.86 MIPS
+      clocks: advancing 47.7 %, fetch held 16.5 %, execute held 31.6 %, writeback held 8.3 %, in a TLB walk 8.8 %
+      I-cache fills 2556403 (7.52 per 1000 instructions), 13.9 clocks each on the bus
+      D-cache fills 2000365 (5.88 per 1000), 19.1 clocks each on the bus; writeback beats 1698812 (424703.0 lines)
+      I-cache fills asked for after an instruction TLB walk 7231989 (21.27 per 1000), answered from a line already held 7032319 (97.2 %) - no DDR3 trip
+      TLB walks: instruction 7232430 (21.27 per 1000), data 25312540 (74.45 per 1000), 1.9 clocks per walk
+      uncached fetches 120; bus transactions 4997984, 15.5 clocks each on the bus
+    DDR3 port: display held it 72.1 %, RAM 9.5 %, rasteriser 0.0 %, others 1.6 %
+      RAM: 5181963 transactions, 13.0 clocks held and 0.0 clocks queued per transaction
+      rasteriser: 9835 transactions, 1.0 clocks held and 1.1 clocks queued each
+      RAM reads: 3482855, 11.1 clocks from the bridge taking one to its first word, behind 4.1 words owed to earlier reads; 0.02 clocks of gaps inside a burst
+      the bridge alone (reads taken with nothing owed): 3274299 reads, 9.4 clocks to the first word
+      CPU accesses held behind a DMA transaction: 0.00 s in all; DMA transactions 6764
+      reads: 70713711, 3.2 clocks from issue to the first word; display bursts 67230848; 0.0 clocks waiting on DDRAM_BUSY per transaction
+  disk over the window: hps xact rd 0 wr 14, target wait 0.03 s, DATA 0.03 s for 0.05 MB, cache hits 0 misses 0
+  DATA IN waiting on the initiator 0.00 s, on the target 0.00 s; DATA OUT on the initiator 0.01 s, on the target 0.02 s
+
+  time series (10 s buckets): idle / kernel / user %, and of busy: run / fetch / exec %
+       0 s  idle   0.0  kern   2.3  user  97.7 | run  36.0  fetch  21.4  exec  36.0
+      10 s  idle  84.8  kern   1.0  user  14.3 | run  36.2  fetch  22.4  exec  35.5
