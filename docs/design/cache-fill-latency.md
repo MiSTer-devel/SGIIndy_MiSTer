@@ -429,3 +429,105 @@ next two hit, the burst resumes at the line after, a jump does not burst, the
 instruction buffer keeps its lines) and data streams in the random mix: 23
 checks, and in 60,000 transactions under CPU stores and DMA writes 2,230 data
 fills answered from the buffer, 0 wrong words.
+
+### Build 47 on the board
+
+Build 47 (a10e2c8) = build 46 + the data buffer. SEED 1 on m900 met timing
+(core clock +0.382 ns, HDMI +0.252, 37,406 ALMs, 89 %),
+`output_files/sgiindy-b47-seed1-m900.rbf`, md5 `e107dfbf8cff0a858b1fa5bc12650787`.
+Seed 3 on the PC missed the core clock by 0.094 ns on four REX3 -> `p_wdata`
+endpoints (nothing of this build's); it is the measurement bitstream of the
+A/B below (md5 `1927503461f48c4aa896b38e0d3d3f2a`).
+
+`scripts/perfprobe.sh` on the pristine image, one bitstream, the data buffer on
+and then off (`dpf=off`; the instruction buffer on in both), 2026-09-27
+(tests/out/hw/perf-b47s3-*):
+
+| workload | data buffer on | off | |
+|---|---:|---:|---:|
+| launch to the X login screen | 79 s | 80 s | |
+| 60 x `/bin/ls /` | 3.50 s | 3.55 s | 1.02x |
+| perl loop | 11.83 s | 11.85 s | 1.00x |
+| `ls -lR /usr/lib/X11` into the Console | 5.24 s | 5.32 s | 1.02x |
+| bzip2 -9 of /unix | 80.72 s | 80.90 s | 1.00x |
+| dd 10 MB off the raw disk | 2.66 s | 2.60 s | (noise) |
+| `xterm -e /bin/true`, cold / warm | 0.645 / 0.376 s | 0.651 / 0.374 s | |
+| D-cache fill, clocks on the bus (boot / login / bzip2) | 18.3 / 18.7 / 18.7 | 19.2 / 19.2 / 19.1 | |
+
+**The data buffer is worth one to two percent, not the replay's promise.**
+Over two whole IRIX sessions (boot, desktop, the CD copy; boot, desktop,
+audio) it answered **9.9 % and 11.3 %** of the data fills; 13.5 % of them
+burst, and only 37-42 % of the lines a burst brought were then asked for. The
+boot replay of section 8 said 57.5 %: its trace counts every store miss as a
+fill and is dominated by the PROM's and the early kernel's zeroing, which a
+running system does little of. The instruction buffer answered 42.7 % and
+47.5 % of the instruction fills in the same sessions, as in build 46.
+
+cpu-tests as the PROM: **2415 / 0** over 255 tests with the data buffer on and
+off. The bench (tests/hw-cputest/bench.patch, 916c869) now walks the 256 KB
+scratch region four ways; Count ticks per load, a tick is two clocks:
+
+| walk | data buffer on | off |
+|---|---:|---:|
+| `ld_miss`, one lw per 32 bytes (a stream) | 9 | 12 |
+| `ld_miss64`, one per 64 bytes (never a stream) | 12.2 | 12.2 |
+| `ld_miss_dirty`, lw + sw per 32 bytes | 18.1 | 21.7 |
+| `ld_miss_dirty64`, lw + sw per 64 bytes | 21.7 | 21.7 |
+
+So on a pure stream the buffer takes a quarter off every miss, as designed -
+and **a dirty victim costs 9.5 ticks, 19 clocks**: a miss that evicts a dirty
+line takes 43 clocks against 24. In both sessions above **51 % of the data
+fills evicted a dirty line** (18.2 M lines written back against 35.8 M fills;
+bzip2's window 39 %). Reading cpu_datacache.vhd, cpu.vhd and the port: the
+victim is read out of the cache and staged (7 clocks), goes into the write
+FIFO as one line, and the fill that evicted it is queued behind it; memstate
+runs one transaction at a time, so the fill's read reaches the bridge only
+after the line's four write commands have been taken and acknowledged. That is
+the next thing to take off a fill's path (section 10).
+
+The rest of the board run, same bitstream: the CD file identical to the ISO
+(`cdfile.sh`); IRIX plays audio and halts cleanly (`audioprobe.sh` on the
+autoconfigured image); `diskcheck` PASS - the first since `efsread.py` stopped
+reading past an inode's extents (docs/design/scsi-read-ready.md) - and
+`diskstress` PASS. Evidence: tests/out/hw/b47/ (the release candidate) and
+tests/out/hw/b47s3/, perf-b47s3-*/ (the A/B).
+
+The buffer stays: it costs 157 ALMs, never loses, and a stream gains a
+quarter. But the data side's time is elsewhere.
+
+## 10. Next: the fill before the victim
+
+A dirty miss today, on the board, clock by clock from the miss (D0):
+WRITEBACK1ADDR..4WRITE read the victim out (D1-D7, into cpu.vhd's staging
+queue); the line enters the write FIFO at E9; WRITEBACKDONE raises the fill
+request at D10 and it enters the FIFO at E12, behind the line; memstate takes
+the line (D10), the port takes its four words (D13-D16), the acknowledgement
+comes back (D17), memstate is free (D18); only then is the fill popped (D19)
+and its read taken by the bridge (D22, against D6 for a clean miss).
+
+Two changes take most of that off the fill's path, both in cpu_datacache.vhd /
+cpu.vhd and neither touching the port:
+
+* WRITEBACKDONE raises the fill request without waiting for the line to be in
+  the FIFO. The victim's four beats are out of the cache RAM by then (the last
+  is read in WRITEBACK4WRITE), so the fill cannot overwrite what the line
+  still needs.
+* cpu.vhd's scheduler takes a latched data-cache refill before the staged
+  line. The FIFO then holds the fill, then the line; memstate runs the fill
+  first and the line while the pipeline goes on.
+
+What must not overtake the line is unchanged: an uncached access and an
+instruction fill wait for `datacache_wb_busy` exactly as before, a re-miss on
+the victim can only be requested after the fill completes (the cache takes
+one miss at a time), by when the line is in the FIFO ahead of it, and every
+port write is snooped by ram_arb's buffers as before. The fill can never be
+for the victim's own line (they share a set). `tests/wborder` checks all four
+over every set (a9e23e7) and passes on build 47; `bench/ld_miss_dirty64`
+(21.7 ticks today, 12.2 clean) is the board observable.
+
+Expected: about 9 of the 19 clocks off every dirty miss - half of all data
+fills - so a few percent where data misses bind (bzip2's window: 12.5 M
+dirty lines, ~3 %); the line's own ~9 clocks then only delay a request issued
+while it is draining. A posted line write in ram_arb (acknowledged when
+latched, the next read allowed past it with an address check) would hide the
+rest and is the step after.

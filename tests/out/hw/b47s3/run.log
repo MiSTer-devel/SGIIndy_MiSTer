@@ -1,0 +1,6 @@
+[19:58:56] staging output_files/sgiindy-b47-seed3.rbf md5 1927503461f48c4aa896b38e0d3d3f2a; steps: perfon perfoff
+[19:58:57] perfprobe, both prefetch buffers on
+[20:14:53] perf-dpf rc=0 | user	0m0.020s|sys	0m0.059s|[20:14:53] done -> tests/out/hw/perf-b47s3-dpf|
+[20:14:53] perfprobe, data buffer off
+[20:30:47] perf-nodpf rc=0 | user	0m0.020s|sys	0m0.054s|[20:30:47] done -> tests/out/hw/perf-b47s3-nodpf|
+[20:30:48] BOARDRUN DONE
