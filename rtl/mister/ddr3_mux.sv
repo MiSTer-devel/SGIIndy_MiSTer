@@ -122,8 +122,8 @@ module ddr3_mux #(
     output logic        fbr_dout_valid,
     // The display needs both plane sets now: FBR_AHEAD_DEEP, not FBR_AHEAD.
     input  logic        fbr_deep,
-    // A line cache is about to run dry: the display goes ahead of main
-    // memory until it is not (see "who goes next").
+    // A line cache is about to run dry: FBR_AHEAD_DEEP as well (see "who
+    // goes next" for why that and not priority).
     input  logic        fbr_urgent,
 
     // ---- master 1: the PROM image download -------------------------------
@@ -331,12 +331,15 @@ module ddr3_mux #(
     // and the rasteriser, rotating; the beacon only when nobody else is
     // asking, so observing the machine cannot cost it a clock.
     //
-    // EXCEPT WHEN THE DEADLINE IS CLOSE. A line cache fetching the line the
-    // display wants next or the one after (`fbr_urgent`) goes ahead of main
-    // memory, up to its in-flight cap, which still leaves main memory a turn
-    // between every few sub-bursts. Behind a CPU asking every ~20 clocks the
-    // display got too little to keep even the drawing planes whole
-    // (verilator/tb_menufetch.cpp; the board's beacon counted rgb_miss).
+    // THE DEADLINE IS MET BY DEPTH, NOT BY ORDER. Behind 12-word CPU reads
+    // every ~20 clocks the display got too little to keep even the drawing
+    // planes whole (verilator/tb_menufetch.cpp; the board's beacon counted
+    // rgb_miss). A line cache about to run dry (`fbr_urgent`) gets the deep
+    // in-flight allowance, and that alone cured it. Putting the urgent display
+    // ahead of main memory as well changed no bench number and put a term in
+    // front of `ram_now` - the CPU's same-clock path, sgi_memmap's adder into
+    // DDRAM_DIN/ADDR, the core clock's tightest family: build 49's first fit
+    // missed by 0.726 ns there. So main memory stays first, always.
     logic [1:0]            rr;
     logic [$clog2(NM)-1:0] pick;
     logic                  any;
@@ -368,10 +371,7 @@ module ddr3_mux #(
     always_comb begin
         pick = '0;
         any  = 1'b0;
-        if (cand[M_FBR] && fbr_urgent_q) begin
-            pick = $clog2(NM)'(M_FBR);
-            any  = 1'b1;
-        end else if (cand[M_RAM]) begin
+        if (cand[M_RAM]) begin
             pick = $clog2(NM)'(M_RAM);
             any  = 1'b1;
         end else if (cand[M_FBR]) begin

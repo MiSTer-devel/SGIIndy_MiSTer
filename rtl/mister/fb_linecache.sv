@@ -183,8 +183,9 @@ module fb_linecache #(
     // have more reads in flight (`fbr_deep`).
     output logic        fetching,
     // ...and that line is the next one the display wants, or the one after:
-    // one more slow line and pixels go black. ddr3_mux puts the display
-    // ahead of main memory while this is set (`fbr_urgent`).
+    // one more slow line and pixels go black. ddr3_mux lets the display have
+    // more reads in flight while this is set (`fbr_urgent`), and fb_fetch_arb
+    // serves an urgent auxiliary cache before a drawing cache that is not.
     output logic        urgent,
     // Lines published as zeros without a fetch, since reset. What TRACK_ZERO
     // is saving, as a number the beacon can show.
