@@ -62,7 +62,7 @@ static const int BPP = 4;                // bytes per pixel in one plane set
 // which is what the hardware was doing; at four bytes a pixel it reports none.
 static const int PIX_DIV = 1;            // core clocks per pixel
 // fb_linecache's ZERO_MASK: the bits of a word the display can see.
-static const uint64_t ZERO_MASK = 0x00FFFF0C00FFFF0Cull;
+static const uint64_t ZERO_MASK = 0x00FFFF0000FFFF00ull;
 
 static Vfb_linecache *dut;
 static std::mt19937 rng(9876);

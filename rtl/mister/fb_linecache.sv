@@ -74,9 +74,10 @@
 //  to refill it.
 //
 //  TRACK_ZERO - THE AUXILIARY PLANES ARE ALMOST ALWAYS EMPTY. The compositor
-//  only ever looks at the popup bits and the overlay byte of the auxiliary
-//  word (ZERO_MASK names them, for both pixels of a word), and on a desktop
-//  those are zero on every line that is not under a menu. So this keeps one
+//  looks only at the overlay bytes of the auxiliary word (ZERO_MASK names
+//  them, for both pixels of a word) - the popup bits reach it with the
+//  drawing planes, out of the window-ID copy (newport.sv) - and on a desktop
+//  the overlay is zero almost everywhere. So this keeps one
 //  flag per frame buffer line: "may hold something under the mask". The
 //  rasteriser SETS it whenever it writes a value with such bits into the
 //  auxiliary planes of that line (`mark`, `mark_line`); the fill CLEARS it
@@ -92,6 +93,14 @@
 //  over-subscribed bus starved the auxiliary fills, and lines whose fills
 //  never completed stayed flagged for frames. The drawing-plane instance
 //  leaves TRACK_ZERO off and fetches every line.
+//
+//  A FILL THAT FALLS BEHIND SKIPS AHEAD. A line is published only when the
+//  whole of it has arrived, so fetching a line the display is already on, or
+//  has passed, serves nothing. Until build 49 the fill did exactly that: one
+//  line short of bandwidth and it fetched every remaining line of the frame
+//  after the display had left it, so a shortfall lost the rest of the frame
+//  instead of a line (verilator/tb_menufetch.cpp). Now the next fill is the
+//  line after the one being displayed.
 //
 //  A MISS SERVES BLACK RATHER THAN STALLING, because stalling is not on the
 //  menu: there is no back-pressure on this path. A miss costs one pixel of
@@ -140,8 +149,9 @@ module fb_linecache #(
     // The per-line flag table (see the header). Off for the drawing planes.
     parameter bit TRACK_ZERO   = 1'b0,
     // The bits of a fetched word the display can ever see: per 32-bit pixel
-    // slot the overlay byte pair [23:8] and the popup bits [3:2].
-    parameter logic [63:0] ZERO_MASK = 64'h00FFFF0C_00FFFF0C
+    // slot the overlay byte pair [23:8]. (The popup bits [3:2] were here until
+    // build 49; the display now takes them from the drawing planes.)
+    parameter logic [63:0] ZERO_MASK = 64'h00FFFF00_00FFFF00
 ) (
     input  logic        clk,
     input  logic        reset,
@@ -168,6 +178,14 @@ module fb_linecache #(
     input  logic        fbr_dout_valid,
 
     output logic        miss,          // a pixel was asked for and not resident
+    // A line is being fetched. From the auxiliary instance it means the
+    // display needs both plane sets right now, which is when ddr3_mux lets it
+    // have more reads in flight (`fbr_deep`).
+    output logic        fetching,
+    // ...and that line is the next one the display wants, or the one after:
+    // one more slow line and pixels go black. ddr3_mux puts the display
+    // ahead of main memory while this is set (`fbr_urgent`).
+    output logic        urgent,
     // Lines published as zeros without a fetch, since reset. What TRACK_ZERO
     // is saving, as a number the beacon can show.
     output logic [31:0] dbg_skips,
@@ -207,6 +225,7 @@ module fb_linecache #(
     // which keep running through blanking - so the throttle must not look at
     // it directly.
     logic [10:0]  disp_line;
+    logic         disp_seen;      // the display has asked for a pixel this frame
     logic         vs_d, restart;
 
     // The line is the address within the region: REGION_BASE is a multiple
@@ -305,6 +324,7 @@ module fb_linecache #(
     wire [31:0] fill_byte  = 32'({20'b0, fill_pos} << 3);
     wire [31:0] words_left = 32'(LINE_WORDS) - 32'({20'b0, fill_pos});
 
+    assign fetching  = (fst != F_IDLE);
     assign fbr_addr  = REGION_BASE + line_base + fill_byte;
     assign fbr_burst = (words_left < 32'(BURST)) ? words_left[7:0] : 8'(BURST);
     assign fbr_req   = (fst == F_REQ);
@@ -322,6 +342,11 @@ module fb_linecache #(
     wire signed [12:0] ahead = $signed({2'b0, fill_line}) - $signed({2'b0, disp_line});
     wire may_fill = (restart || (ahead < 13'sd0) || (ahead < $signed(13'(NBUF))))
                   && (int'(fill_line) < LINES);
+    // Behind: the display is on this line or past it (see the header). Not
+    // at the top of a frame, where disp_line is zero before the display has
+    // asked for anything and line 0 is exactly what must be fetched.
+    wire behind = disp_seen && (ahead <= 13'sd0);
+    assign urgent = fetching && disp_seen && (ahead < 13'sd2);
 
     always_ff @(posedge clk) begin
         if (reset) begin
@@ -333,6 +358,7 @@ module fb_linecache #(
             fill_pos  <= '0;
             burst_left <= 9'd0;
             disp_line <= 11'h7FF;
+            disp_seen <= 1'b0;
             fst       <= F_IDLE;
             vs_d      <= 1'b0;
             restart   <= 1'b1;
@@ -354,6 +380,7 @@ module fb_linecache #(
                 zero_q    <= zero[hit_idx];
                 miss_q    <= !hit_any;
                 disp_line <= req_line;
+                disp_seen <= 1'b1;
             end
 
             vs_d <= vs;
@@ -381,9 +408,15 @@ module fb_linecache #(
                         // during blanking - so leaving it there makes the fill
                         // look a thousand lines behind and it never throttles.
                         disp_line <= 11'd0;
+                        disp_seen <= 1'b0;
                         // The very first line of a frame is fetched or
                         // published on the next pass through F_IDLE, where
                         // its flag is consulted like any other.
+                    end else if (behind) begin
+                        // Too late for this line: go to the next one the
+                        // display has not reached. Its flag is untouched - it
+                        // was not fetched, so nothing is known about it.
+                        fill_line <= disp_line + 11'd1;
                     end else if (may_fill) begin
                         if (!fill_flag) begin
                             // Nothing visible on this line: publish zeros

@@ -33,7 +33,7 @@ static const int STRIDE = 2048;
 static const int BPP = 4;
 static const int PIX_DIV = 1;
 static const uint32_t AUX_OFF = 0x00800000u;
-static const uint64_t ZERO_MASK = 0x00FFFF0C00FFFF0Cull;
+static const uint64_t ZERO_MASK = 0x00FFFF0000FFFF00ull;
 
 static Vtb_fetcharb *dut;
 static std::mt19937 rng(4321);

@@ -88,8 +88,23 @@ module ddr3_mux #(
     // stays continuous - FBR_AHEAD sub-bursts still overlap - and in tb_ddr3
     // its worst wait went from 45 clocks to 83, against ~5000 clocks of
     // line-cache slack; perfprobe's line-cache miss counts are the check.
+    //
+    // BUT 4 x 2 CARRIES ONE PLANE SET AND NOT TWO. At the bridge's ~10-clock
+    // latency eight words in flight is ~0.46 words a clock; the drawing
+    // planes take 0.39 of it, and a line with an overlay needs the
+    // auxiliary planes' 672 words as well. Build 48's line caches got ~0.07
+    // for those and lost every overlay line (verilator/tb_menufetch.cpp) -
+    // unseen, because perfprobe's desktop has no overlay. So while the
+    // auxiliary cache is fetching (`fbr_deep`) the display may have
+    // FBR_AHEAD_DEEP sub-bursts in flight: the CPU waits behind up to 20
+    // words instead of 8 only while an overlay is on the screen. 5 and not 4
+    // because behind a CPU asking every 20 clocks 4 still lost 191 of a
+    // menu-sized overlay's 324 lines; 5 lost none, for +0.8 clocks a CPU read
+    // while the overlay is up. It must stay at most RF - 3, the read queue's
+    // room beside the other three readers - 5 is exactly that.
     parameter int FBR_SUB   = 4,
-    parameter int FBR_AHEAD = 2
+    parameter int FBR_AHEAD = 2,
+    parameter int FBR_AHEAD_DEEP = 5
 ) (
     input  logic        clk,
     input  logic        reset,
@@ -105,6 +120,11 @@ module ddr3_mux #(
     output logic        fbr_taken,    // the burst has been issued
     output logic [63:0] fbr_dout,
     output logic        fbr_dout_valid,
+    // The display needs both plane sets now: FBR_AHEAD_DEEP, not FBR_AHEAD.
+    input  logic        fbr_deep,
+    // A line cache is about to run dry: the display goes ahead of main
+    // memory until it is not (see "who goes next").
+    input  logic        fbr_urgent,
 
     // ---- master 1: the PROM image download -------------------------------
     // Only ever active while the CPU is held in reset, so its priority costs
@@ -282,6 +302,17 @@ module ddr3_mux #(
     logic  [2:0] fbr_out;        // sub-bursts asked for and not finished
     logic        fbr_first;      // no sub-burst of this burst taken yet
     wire   [7:0] fbr_n = (fbr_isl < 8'(FBR_SUB)) ? fbr_isl : 8'(FBR_SUB);
+    // Registered: a clock late is nothing to a line cache lines ahead, and it
+    // keeps a signal from the display side out of the pick's logic depth.
+    logic        fbr_deep_q, fbr_urgent_q;
+    always_ff @(posedge clk) begin
+        fbr_deep_q   <= reset ? 1'b0 : fbr_deep;
+        fbr_urgent_q <= reset ? 1'b0 : fbr_urgent;
+    end
+    // Urgent is deep as well: going first does not raise the display's rate
+    // when the rate is set by how many of its reads are in flight.
+    wire   [2:0] fbr_cap = (fbr_deep_q || fbr_urgent_q) ? 3'(FBR_AHEAD_DEEP)
+                                                        : 3'(FBR_AHEAD);
 
     // ---- who goes next --------------------------------------------------------
     // PIPELINED, SO PRIORITY DECIDES ORDER AND NOT WHO WAITS FOR WHOM. Every
@@ -299,6 +330,13 @@ module ddr3_mux #(
     // DISPLAY, the only master with a deadline; then the download, the PROM
     // and the rasteriser, rotating; the beacon only when nobody else is
     // asking, so observing the machine cannot cost it a clock.
+    //
+    // EXCEPT WHEN THE DEADLINE IS CLOSE. A line cache fetching the line the
+    // display wants next or the one after (`fbr_urgent`) goes ahead of main
+    // memory, up to its in-flight cap, which still leaves main memory a turn
+    // between every few sub-bursts. Behind a CPU asking every ~20 clocks the
+    // display got too little to keep even the drawing planes whole
+    // (verilator/tb_menufetch.cpp; the board's beacon counted rgb_miss).
     logic [1:0]            rr;
     logic [$clog2(NM)-1:0] pick;
     logic                  any;
@@ -324,13 +362,16 @@ module ddr3_mux #(
         cand = pend & ~busy_m;
         cand[M_RAM] = (pend[M_RAM] | ram_arrive) & ~busy_m[M_RAM];
         cand[M_FBR] = fbr_act && (fbr_isl != 8'd0)
-                   && (fbr_out < 3'(FBR_AHEAD))
+                   && (fbr_out < fbr_cap)
                    && !(cmd_v && cmd_m == $clog2(NM)'(M_FBR));
     end
     always_comb begin
         pick = '0;
         any  = 1'b0;
-        if (cand[M_RAM]) begin
+        if (cand[M_FBR] && fbr_urgent_q) begin
+            pick = $clog2(NM)'(M_FBR);
+            any  = 1'b1;
+        end else if (cand[M_RAM]) begin
             pick = $clog2(NM)'(M_RAM);
             any  = 1'b1;
         end else if (cand[M_FBR]) begin
@@ -384,8 +425,8 @@ module ddr3_mux #(
     // THE BRIDGE ANSWERS READS IN THE ORDER IT TOOK THEM, AND THIS KEEPS THAT
     // ORDER: `rf_*` is a queue of {master, words} for every read taken and not
     // yet answered, oldest at `rf_rd`, and each DOUT_READY belongs to the head.
-    // At most FBR_AHEAD display sub-bursts plus one read each for main memory,
-    // the PROM and the rasteriser can be in it.
+    // At most FBR_AHEAD_DEEP display sub-bursts plus one read each for main
+    // memory, the PROM and the rasteriser can be in it.
     //
     // WHY NOT ONE TRANSACTION AT A TIME, as this file did until build 28. The
     // bridge answers a read ~10 clocks after taking it and the display fetches

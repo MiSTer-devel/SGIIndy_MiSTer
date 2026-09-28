@@ -450,6 +450,20 @@ fetcharbtest:
 	   -o Vtb_fetcharb tb_fetcharb.sv $(RTL)/mister/fb_linecache.sv \
 	   $(RTL)/mister/fb_fetch_arb.sv tb_fetcharb.cpp
 
+# --- ...and through the real ddr3_mux, with a menu or an overlay posted -----
+# The two caches, the arbiter and ddr3_mux against a bridge with a ~10-clock
+# read latency: build 48's invisible menus (tb_menufetch.cpp's header). The
+# split is the shipping one unless MENUFETCH_G overrides it, e.g.
+#   make menufetchtest MENUFETCH_G="-GFBR_SUB=4 -GFBR_AHEAD=4"
+#   CASE=3 LAT=12 ./obj_dir_menufetch/Vtb_menufetch    # one picture, knobs
+menufetchtest:
+	$V -cc --exe --build --build-jobs 0 --verilate-jobs 1 --Mdir ./obj_dir_menufetch --top-module tb_menufetch \
+	   $(MENUFETCH_G) -O3 -CFLAGS "-O2 -std=c++17 -I.." $(CPUTEST_W) -Wno-LATCH \
+	   --x-assign fast --x-initial fast --noassert \
+	   -o Vtb_menufetch tb_menufetch.sv $(RTL)/mister/fb_linecache.sv \
+	   $(RTL)/mister/fb_fetch_arb.sv $(RTL)/mister/ddr3_mux.sv tb_menufetch.cpp
+	./obj_dir_menufetch/Vtb_menufetch
+
 linecachetest:
 	$V -cc --exe --build -j 0 --Mdir ./obj_dir_lcache --top-module fb_linecache \
 	   -GTRACK_ZERO=1 \

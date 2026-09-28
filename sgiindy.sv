@@ -700,9 +700,16 @@ fb_linecache #(.TRACK_ZERO(1'b0)) u_linecache
 	.fbr_dout_valid(lr_valid),
 
 	.miss      (lc_miss),
+	.fetching (),
+	.urgent   (lc_urgent),
 	.dbg_skips (),
 	.dbg_miss_mark (status[14])
 );
+
+// While it fetches a line the display needs both plane sets, and ddr3_mux
+// lets it have more reads in flight (`fbr_deep`); either cache about to run
+// dry puts the display ahead of main memory (`fbr_urgent`).
+wire la_fetching, lc_urgent, la_urgent;
 
 // The auxiliary planes: only the lines the rasteriser has put something
 // visible on, which on a desktop is almost none of them (fb_linecache.sv,
@@ -728,6 +735,8 @@ fb_linecache #(.TRACK_ZERO(1'b1), .REGION_BASE(32'h0080_0000)) u_auxcache
 	.fbr_dout_valid(la_valid),
 
 	.miss      (la_miss),
+	.fetching (la_fetching),
+	.urgent   (la_urgent),
 	.dbg_skips (la_skips),
 	.dbg_miss_mark (1'b0)
 );
@@ -738,6 +747,7 @@ fb_fetch_arb u_fetch_arb
 	.reset     (reset),
 
 	.a_req        (lr_req),
+	.a_urgent     (lc_urgent),
 	.a_addr       (lr_addr),
 	.a_burst      (lr_burst),
 	.a_taken      (lr_taken),
@@ -745,6 +755,7 @@ fb_fetch_arb u_fetch_arb
 	.a_dout_valid (lr_valid),
 
 	.b_req        (la_req),
+	.b_urgent     (la_urgent),
 	.b_addr       (la_addr),
 	.b_burst      (la_burst),
 	.b_taken      (la_taken),
@@ -776,6 +787,8 @@ ddr3_mux u_mem
 	.fbr_taken     (lc_taken),
 	.fbr_dout      (lc_dout),
 	.fbr_dout_valid(lc_valid),
+	.fbr_deep      (la_fetching),
+	.fbr_urgent    (lc_urgent | la_urgent),
 
 	.dl_req    (dl_req),
 	.dl_addr   (dl_addr),

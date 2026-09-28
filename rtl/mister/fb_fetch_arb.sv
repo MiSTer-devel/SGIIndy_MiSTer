@@ -25,7 +25,10 @@
 //  Port A has priority when both ask at the same moment. It is the drawing
 //  planes, without which there is no picture at all; the auxiliary cache
 //  usually has nothing to fetch (see TRACK_ZERO in fb_linecache.sv) and can
-//  wait a burst when it does.
+//  wait a burst when it does. UNLESS B IS ABOUT TO RUN DRY AND A IS NOT
+//  (their `urgent` outputs): A is then lines ahead and can wait a burst, and
+//  under a busy CPU an overlay otherwise lost most of its lines to a drawing
+//  cache that never needed the turn (verilator/tb_menufetch.cpp).
 //============================================================================
 
 module fb_fetch_arb (
@@ -34,6 +37,7 @@ module fb_fetch_arb (
 
     // ---- reader A (drawing planes) ---------------------------------------
     input  logic        a_req,
+    input  logic        a_urgent,
     input  logic [31:0] a_addr,
     input  logic  [7:0] a_burst,
     output logic        a_taken,
@@ -42,6 +46,7 @@ module fb_fetch_arb (
 
     // ---- reader B (auxiliary planes) -------------------------------------
     input  logic        b_req,
+    input  logic        b_urgent,
     input  logic [31:0] b_addr,
     input  logic  [7:0] b_burst,
     output logic        b_taken,
@@ -93,7 +98,7 @@ module fb_fetch_arb (
                 end
             end else if (!busy && (a_req || b_req)) begin
                 sel_valid <= 1'b1;
-                sel_b     <= !a_req;
+                sel_b     <= !a_req || (b_req && b_urgent && !a_urgent);
             end
 
             if (busy && fbr_dout_valid) begin

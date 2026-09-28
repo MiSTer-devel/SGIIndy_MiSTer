@@ -118,8 +118,8 @@ module np_rex3 #(
     output logic  [7:0] fb_be,
     input  logic [63:0] fb_rdata,
     input  logic        fb_ack,
-    // A visible value (overlay or popup bits) was just written into the
-    // auxiliary planes of frame buffer line `aux_mark_line`. The display
+    // A visible overlay value was just written into the auxiliary planes of
+    // frame buffer line `aux_mark_line`. The display
     // side's flag table (rtl/mister/fb_linecache.sv, TRACK_ZERO) needs it.
     output logic        aux_mark,
     output logic [10:0] aux_mark_line,
@@ -1432,14 +1432,15 @@ module np_rex3 #(
     wire [7:0] fb_be_masked = dst_x[0] ? {slot_be, 4'b0000} : {4'b0000, slot_be};
 
     // An auxiliary write that touches byte 0 changes aux[3:0], so the copy in
-    // the drawing slot has to follow (DR_CID). And one that puts anything the
-    // display can see - overlay or popup bits - into a line tells the display
-    // side's flag table about it (fb_linecache's TRACK_ZERO).
+    // the drawing slot has to follow (DR_CID) - and the display reads the
+    // popup bits from that copy (newport.sv). One that puts an overlay value
+    // the display can see into a line tells the display side's flag table
+    // about it (fb_linecache's TRACK_ZERO); popup bits no longer do, because
+    // the display no longer fetches the auxiliary planes for them.
     wire cid_copy_need = is_aux_plane && slot_be[0];
     wire aux_visible   = is_aux_plane
                        && ((slot_be[2] && (plane_val[23:16] != 8'h0))
-                        || (slot_be[1] && (plane_val[15:8]  != 8'h0))
-                        || (slot_be[0] && (plane_val[3:2]   != 2'b0)));
+                        || (slot_be[1] && (plane_val[15:8]  != 8'h0)));
 
     // A READ's pixel on its way into the host word: the plane value in
     // colour-index mode, and the 24-bit colour quantised to the host's own

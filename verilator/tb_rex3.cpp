@@ -136,12 +136,20 @@ static void bridge_before_edge()
     }
 }
 
+// aux_mark pulses seen, and the lowest and highest line they named.
+static uint64_t marks = 0;
+static int mark_lo = 1 << 30, mark_hi = -1;
 static void tick()
 {
     bridge_before_edge();
     dut->eval();
     dut->clk = 1; dut->eval();
     dut->clk = 0; dut->eval();
+    if (dut->aux_mark) {
+        marks++;
+        if ((int)dut->aux_mark_line < mark_lo) mark_lo = dut->aux_mark_line;
+        if ((int)dut->aux_mark_line > mark_hi) mark_hi = dut->aux_mark_line;
+    }
     clks++;
 }
 
@@ -571,9 +579,11 @@ int main(int argc, char **argv)
         wr(R_COLORI,    0x00000003);                   // both popup bits
         wr(R_DRAWMODE1, (3u << 28) | (7u << 12) | (0u << 3) | 5u);
         wr(R_DRAWMODE0, 2 | (1u << 2) | (1u << 8) | (1u << 9));
+        uint64_t marks_before = marks;
         wr(R_XYSTARTI,  ((uint32_t)CX0 << 16) | (uint32_t)CY);
         wr(R_XYENDI | GO, ((uint32_t)(CX0 + CWD - 1) << 16) | (uint32_t)CY);
         for (int i = 0; i < 200000 && dut->gfx_busy; i++) tick();
+        uint64_t pup_marks = marks - marks_before;
         wr(R_WRMASK,    0x00FFFFFF);
 
         uint64_t pup_unchanged = 0, pup_copy_wrong = 0;
@@ -592,6 +602,26 @@ int main(int argc, char **argv)
         check("a popup-plane draw set the popup bits", pup_unchanged == 0);
         check("and refreshed the window-ID copy in every drawing slot",
               pup_copy_wrong == 0);
+
+        // The display reads the popup bits out of that copy (newport.sv), so a
+        // popup draw must not send the auxiliary line cache after its line -
+        // that fetch is what starved build 48's menus. An overlay draw must.
+        wr(R_WRMASK,    0x00FFFF00);
+        wr(R_COLORI,    0x0000005A);
+        wr(R_DRAWMODE1, (3u << 28) | (7u << 12) | (0u << 3) | 4u);
+        mark_lo = 1 << 30; mark_hi = -1;
+        uint64_t marks_ovl = marks;
+        wr(R_XYSTARTI,  ((uint32_t)CX0 << 16) | (uint32_t)(CY + 1));
+        wr(R_XYENDI | GO, ((uint32_t)(CX0 + CWD - 1) << 16) | (uint32_t)(CY + 1));
+        for (int i = 0; i < 200000 && dut->gfx_busy; i++) tick();
+        uint64_t ovl_marks = marks - marks_ovl;
+        wr(R_WRMASK,    0x00FFFFFF);
+        printf("aux_mark: %llu pulses for the popup draw, %llu for an overlay draw on line %d "
+               "(lines %d..%d named)\n", (unsigned long long)pup_marks,
+               (unsigned long long)ovl_marks, CY + 1, mark_lo, mark_hi);
+        check("a popup-plane draw marks no line for the auxiliary fetch", pup_marks == 0);
+        check("an overlay draw marks its line, and only that line",
+              ovl_marks > 0 && mark_lo == CY + 1 && mark_hi == CY + 1);
     }
 
     printf(failures ? "\nREX3FILL: FAIL\n" : "\nREX3FILL: PASS\n");

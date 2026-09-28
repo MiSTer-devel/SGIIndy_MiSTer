@@ -203,6 +203,7 @@ int main(int argc, char **argv)
 
     dut->reset = 1; dut->clk = 0;
     dut->fbr_req = dut->dl_req = dut->ram_req = dut->prom_req = dut->fbw_req = 0;
+    dut->fbr_deep = 0;
     dut->fbr_burst = 1;
     dut->ram_burst = 1;
     dut->ram_we = dut->fbw_we = 0;
@@ -244,6 +245,9 @@ int main(int argc, char **argv)
     std::map<uint32_t, uint64_t> fb_shadow;
 
     for (int c = 0; c < ROUNDS; c++) {
+        // The display's deeper allowance (an overlay on the screen) on for
+        // stretches of ~2000 cycles at a time, so both caps see traffic.
+        if ((c % 2000) == 0) dut->fbr_deep = (rng() & 1);
         // Issue for any idle master, sometimes.
         for (Master *m : all) {
             if (m->busy) { m->wait_cycles++; continue; }
