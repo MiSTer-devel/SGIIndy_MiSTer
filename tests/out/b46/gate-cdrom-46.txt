@@ -1,8 +1,0 @@
-booting ip24prom.070-9101-011.bin with a disk on ID 1 and a CD-ROM on ID 6 ...
-  ok      Running power-on diagnostics
-  ok      System Maintenance Menu
-  ok      SCSI Disk: scsi(0)disk(1)
-  ok      SCSI CDROM: scsi(0)cdrom(6)
-
-console output is in tests/out/cdrom-console.txt
-CDROM: PASS

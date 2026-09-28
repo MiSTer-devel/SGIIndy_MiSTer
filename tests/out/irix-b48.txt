@@ -1,8 +1,0 @@
-booting SGIIndy53-master.img ...
-  ok      System Maintenance Menu
-  ok      Starting up the system
-  ok      IRIX Release 5.3 IP22
-  ok      Silicon Graphics, Inc.
-
-console output is in tests/out/irix-console.txt
-IRIX: PASS

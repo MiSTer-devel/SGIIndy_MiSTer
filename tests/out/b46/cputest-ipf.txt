@@ -1,7 +1,0 @@
- RESULT: 2109 checks passed, 55 failed  (240 tests)
-perf: 1829632 instructions, clocks: run 1833344, fetch held 46784, execute held 1224000, writeback held 1324992, TLB walk 0 (counters are x64)
-perf: I-cache fills 3191 (1.74 per 1000 instructions), D-cache fills 14985 (8.19), writeback beats 52640, uncached fetches 2052
-perf: TLB walks instruction 0 (0.00 per 1000), data 5 (0.00); bus transactions 150811; clocks on the bus for I-fills 22336, D-fills 104832
-perf: I-cache refills after an instruction TLB walk 0, fill requests answered from the cache 0
-perf: instruction fills answered from the prefetch buffer 1660, fills that fetched the next two lines 1531
- RESULT: 2109 checks passed, 55 failed  (240 tests)

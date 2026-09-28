@@ -1,4 +1,0 @@
-[23:15:38] staging output_files/sgiindy-b47-seed1-m900.rbf md5 e107dfbf8cff0a858b1fa5bc12650787; steps: perfon
-[23:15:40] perfprobe
-[23:31:36] perf rc=0 | user	0m0.020s|sys	0m0.056s|[23:31:36] done -> tests/out/hw/perf-b47ctl|
-[23:31:37] BOARDRUN DONE

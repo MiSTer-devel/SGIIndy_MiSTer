@@ -321,264 +321,51 @@ Two readings of the counters:
 * **The board slowed down** between 18:00 and 23:30 with the same bitstream
   (§4); worth finding what shares the DDR3 controller now.
 
-## 8. Build 46: the instruction fill that brings the next two lines
+## 8. Prefetch buffers and the dirty miss (builds 46-48)
 
-Section 7 ended on "fewer trips". The instruction stream says where they are:
-`tools/ipfsim.c` replays the IRIX boot's fetch trace (`--itrace`, 18.9M line
-changes, 588,454 misses in the 16 KB direct-mapped cache) and **53.4 % of the
-misses are to the line after the previous miss** - straight-line code
-running off the end of a line. The next line is nearly always the very next
-line the CPU touches (distance 1 in 337,025 of ~369,000 cases), so a prefetch
-that starts after the miss's fill arrives while the CPU is still executing the
-eight instructions it was waiting for - most of its latency still in front of
-it. Fetching the lines *with* the miss does not have that problem: the bridge's
-9.5 clocks are paid once per request, and the extra words follow at a word a
-clock.
+**Instruction prefetch (build 46).** An instruction line fill that misses
+`ram_arb`'s buffer fetches its line and the next two in one 12-word DDR3
+burst; the two extra lines are kept and answer later fills in 4 beats. Every
+port write (CPU or DMA) invalidates a buffered line it touches. Hidden switch
+`ipf=off` (`status[21]`). Bench: `tb_ipf`.
 
-| model, on the boot trace | DDR3 instruction fills, vs today |
-|---|---:|
-| one-line stream buffer, refilled in the background after every fill | 46.6 % |
-| a miss fetches L..L+1 (one extra line) | 64.6 % |
-| **a miss fetches L..L+2 (two extra lines)** | **54.2 %** |
-| a miss fetches L..L+3 | 48.9 % |
-| 64-byte lines in the cache itself | 62.7 % |
+**Data prefetch (build 47).** A second two-line buffer for data fills, but a
+data fill bursts only on a stream - when its line follows the previous data
+fill's - so a lone miss never pays for a prefetch. Hidden switch `dpf=off`
+(`status[22]`). Beacon words 47/48 count both buffers' hits.
 
-**`rtl/sgi/ram_arb.sv`** does the third row. An instruction line fill
-(`r4300_bus` tags it: `bus_ifill`, mem_size "101") that misses the buffer
-goes to `ddr3_mux` as a **12-word burst**; words 0-3 go to the CPU as before,
-with `cpu_last` on the fourth, and words 4-11 go into a two-line buffer tagged
-with the RAM offset. A later instruction fill of either line is answered from
-the buffer, four words from the clock after its request, with no port
-transaction - and a DMA transaction may take the port in that same clock. The
-port stays busy for the eight extra words, which is the whole cost.
+**The fill ahead of the dirty victim (build 48).** A data miss that evicts a
+dirty line used to read the victim out, queue it in the write FIFO, and only
+then request the fill - behind the line, so the fill's read reached DDR3 after
+the line's four writes were acknowledged. Now `cpu_datacache` raises the fill
+as soon as the victim's beats are out of its RAM (WRITEBACKDONE no longer
+waits for `fifo_block`), and `cpu.vhd`'s scheduler issues a latched refill
+before the staged line. Uncached accesses and instruction fills still wait for
+the line (`datacache_wb_busy`); the fill is never for the victim's line.
+Ordering test: `tests/wborder`.
 
-**Coherence is a snoop at the one place every write passes.** A CPU store, a
-data-cache writeback and every DMA engine's write is issued to the port by
-`ram_arb`; one issued into a buffered line invalidates it. The tag is the RAM
-offset, so the low-memory alias and MEMCFG's banks cannot give one line two
-names; and no write can land while a burst is filling the buffer, because that
-burst is the port's one transaction.
+**On the board** (the same pristine image, same night controls):
 
-`ddr3_mux`, `sim_ram.v` and the ports between them carry a 4-bit burst now.
-The hidden `status[21]` (`scripts/setopt.sh ipf=off`, `--no-ipf` in the
-simulator) turns the buffer off, so one bitstream measures it both ways.
-Beacon word 47 (version 16) counts buffer hits and prefetching fills;
-`bcnread.py --perf` appends them to its line.
+| | result |
+|---|---|
+| instruction buffer, `ipf` on vs off (build 46) | X login 79 vs 90 s, fork 1.14x, perl 1.19x, Console scroll 1.18x; answers 43-48 % of instruction fills |
+| data buffer, `dpf` on vs off (build 47) | 1-2 % (fork, scroll), perl/bzip2 flat; answers ~10 % of data fills (a boot-trace replay had predicted 57 %) |
+| fill ahead of the victim, build 48 vs 47 | fork 1.04x, scroll 1.04x, xterm 1-2 %, bzip2 flat |
 
-Tests: `make -C verilator tb_ipf` drives `ram_arb` against a slow
-one-transaction memory holding real values, with the CPU storing into and
-writing back over the buffered lines and a DMA master writing underneath -
-every word handed to the CPU must be what memory held (60,000 random
-transactions, 19,584 buffer hits, 0 wrong). With the snoop removed it fails at
-once. `ramarbtest` (the arbiter's protocol at latencies 1/12/60) passes
-unchanged.
+cpu-tests `bench/ld_miss*` (tests/hw-cputest/bench.patch), Count ticks per load
+(one tick = two clocks):
 
-### Build 46 on the board
-
-`scripts/perfprobe.sh` on the pristine image, one bitstream, the buffer on and
-then off (`ipf=off`), 2026-09-27 (tests/out/hw/perf-b46s1-*):
-
-| workload | buffer on | buffer off | |
+| walk | build 47, dpf off | build 47 | build 48 |
 |---|---:|---:|---:|
-| launch to the X login screen | 79 s | 90 s | 1.14x |
-| 60 x `/bin/ls /` | 3.52 s | 4.02 s | 1.14x |
-| perl loop | 12.14 s | 14.49 s | **1.19x** |
-| `ls -lR /usr/lib/X11` into the Console | 5.27 s | 6.21 s | 1.18x |
-| dd 10 MB off the raw disk | 2.62 s | 2.85 s | 1.09x |
-| `xterm -e /bin/true`, cold / warm | 0.65 / 0.37 s | 0.69 / 0.40 s | 1.06 / 1.08x |
-| `xdpyinfo` | 0.129 s | 0.140 s | 1.09x |
-| bzip2 -9 of /unix | 81.47 s | 81.57 s | 1.00x |
+| `ld_miss`, a 32-byte stream | 12 | 9 | 9 |
+| `ld_miss64`, never a stream | 12.2 | 12.2 | 12.2 |
+| `ld_miss_dirty64`, every miss evicts a dirty line | 21.7 | 21.7 | 17.5 |
 
-Over the whole session the buffer answered **47 % of all instruction fills**
-(48.8M of 103.7M) - the replay said 46 %. The gain is larger than the replay's
-arithmetic suggested because a hit costs five clocks against a fill's twenty
-and the saved fills are exactly the ones the pipeline was stalled on; bzip2 is
-bound on data misses and does not move.
+So a dirty victim cost 19 clocks and now costs 10.6; about half of IRIX's
+data fills evict one. The perl loop swings run to run with where the
+interpreter lands in the instruction cache (7.5 to 18 instruction fills per
+1000 instructions), not with these changes.
 
-**The data side is next.** `--dtrace` over the same boot: 87.4 % of data-cache
-misses are to the line after the previous one (bzero, bcopy), and the same
-three-line burst would leave 40.9 % of the data fills (four lines: 33.6 %).
-The buffer's coherence argument holds for a write-back data cache too - a
-dirty line is in the cache, not asked for, until its writeback, which the
-snoop sees. What differs is the cost of a useless prefetch: random-access
-code (bzip2) would pay eight port clocks per miss for nothing, so a data
-prefetch wants to follow a stream (the miss is at the previous miss + 1)
-rather than fire on every miss.
-
-## 9. Build 47: the data side, on a stream
-
-`ram_arb` has a second two-line buffer for data line fills (`r4300_bus`
-`bus_dfill`, mem_size "100"), filled and snooped exactly like the instruction
-buffer - with one difference. A data fill bursts only when its line is the one
-after the previous data fill's (`d_next`), so a stream's first miss is a plain
-four-word fill, its second fetches the next two lines, and those two are then
-answered from the buffer; a data miss off any stream costs what it always did.
-On the boot's data trace that keeps 57.5 % of the data fills away from DDR3
-(42.5 % left, against 40.9 % if every data miss burst) while never spending
-the port's eight extra clocks on a lone miss.
-
-The buffers are independent (an instruction fill looks only in the instruction
-buffer, a data fill only in the data one), share the port's one 12-word
-transaction, and are both invalidated by the same snoop. Hidden `status[22]`
-(`setopt.sh dpf=off`, simulator `--no-dpf`) turns the data buffer off; beacon
-word 48 (version 17) counts its hits and stream fills and `bcnread.py --perf`
-appends them.
-
-`tb_ipf` grew a directed stream test (first miss plain, second bursts, the
-next two hit, the burst resumes at the line after, a jump does not burst, the
-instruction buffer keeps its lines) and data streams in the random mix: 23
-checks, and in 60,000 transactions under CPU stores and DMA writes 2,230 data
-fills answered from the buffer, 0 wrong words.
-
-### Build 47 on the board
-
-Build 47 (a10e2c8) = build 46 + the data buffer. SEED 1 on m900 met timing
-(core clock +0.382 ns, HDMI +0.252, 37,406 ALMs, 89 %),
-`output_files/sgiindy-b47-seed1-m900.rbf`, md5 `e107dfbf8cff0a858b1fa5bc12650787`.
-Seed 3 on the PC missed the core clock by 0.094 ns on four REX3 -> `p_wdata`
-endpoints (nothing of this build's); it is the measurement bitstream of the
-A/B below (md5 `1927503461f48c4aa896b38e0d3d3f2a`).
-
-`scripts/perfprobe.sh` on the pristine image, one bitstream, the data buffer on
-and then off (`dpf=off`; the instruction buffer on in both), 2026-09-27
-(tests/out/hw/perf-b47s3-*):
-
-| workload | data buffer on | off | |
-|---|---:|---:|---:|
-| launch to the X login screen | 79 s | 80 s | |
-| 60 x `/bin/ls /` | 3.50 s | 3.55 s | 1.02x |
-| perl loop | 11.83 s | 11.85 s | 1.00x |
-| `ls -lR /usr/lib/X11` into the Console | 5.24 s | 5.32 s | 1.02x |
-| bzip2 -9 of /unix | 80.72 s | 80.90 s | 1.00x |
-| dd 10 MB off the raw disk | 2.66 s | 2.60 s | (noise) |
-| `xterm -e /bin/true`, cold / warm | 0.645 / 0.376 s | 0.651 / 0.374 s | |
-| D-cache fill, clocks on the bus (boot / login / bzip2) | 18.3 / 18.7 / 18.7 | 19.2 / 19.2 / 19.1 | |
-
-**The data buffer is worth one to two percent, not the replay's promise.**
-Over two whole IRIX sessions (boot, desktop, the CD copy; boot, desktop,
-audio) it answered **9.9 % and 11.3 %** of the data fills; 13.5 % of them
-burst, and only 37-42 % of the lines a burst brought were then asked for. The
-boot replay of section 8 said 57.5 %: its trace counts every store miss as a
-fill and is dominated by the PROM's and the early kernel's zeroing, which a
-running system does little of. The instruction buffer answered 42.7 % and
-47.5 % of the instruction fills in the same sessions, as in build 46.
-
-cpu-tests as the PROM: **2415 / 0** over 255 tests with the data buffer on and
-off. The bench (tests/hw-cputest/bench.patch, 916c869) now walks the 256 KB
-scratch region four ways; Count ticks per load, a tick is two clocks:
-
-| walk | data buffer on | off |
-|---|---:|---:|
-| `ld_miss`, one lw per 32 bytes (a stream) | 9 | 12 |
-| `ld_miss64`, one per 64 bytes (never a stream) | 12.2 | 12.2 |
-| `ld_miss_dirty`, lw + sw per 32 bytes | 18.1 | 21.7 |
-| `ld_miss_dirty64`, lw + sw per 64 bytes | 21.7 | 21.7 |
-
-So on a pure stream the buffer takes a quarter off every miss, as designed -
-and **a dirty victim costs 9.5 ticks, 19 clocks**: a miss that evicts a dirty
-line takes 43 clocks against 24. In both sessions above **51 % of the data
-fills evicted a dirty line** (18.2 M lines written back against 35.8 M fills;
-bzip2's window 39 %). Reading cpu_datacache.vhd, cpu.vhd and the port: the
-victim is read out of the cache and staged (7 clocks), goes into the write
-FIFO as one line, and the fill that evicted it is queued behind it; memstate
-runs one transaction at a time, so the fill's read reaches the bridge only
-after the line's four write commands have been taken and acknowledged. That is
-the next thing to take off a fill's path (section 10).
-
-The rest of the board run, same bitstream: the CD file identical to the ISO
-(`cdfile.sh`); IRIX plays audio and halts cleanly (`audioprobe.sh` on the
-autoconfigured image); `diskcheck` PASS - the first since `efsread.py` stopped
-reading past an inode's extents (docs/design/scsi-read-ready.md) - and
-`diskstress` PASS. Evidence: tests/out/hw/b47/ (the release candidate) and
-tests/out/hw/b47s3/, perf-b47s3-*/ (the A/B).
-
-The buffer stays: it costs 157 ALMs, never loses, and a stream gains a
-quarter. But the data side's time is elsewhere.
-
-## 10. Next: the fill before the victim
-
-A dirty miss today, on the board, clock by clock from the miss (D0):
-WRITEBACK1ADDR..4WRITE read the victim out (D1-D7, into cpu.vhd's staging
-queue); the line enters the write FIFO at E9; WRITEBACKDONE raises the fill
-request at D10 and it enters the FIFO at E12, behind the line; memstate takes
-the line (D10), the port takes its four words (D13-D16), the acknowledgement
-comes back (D17), memstate is free (D18); only then is the fill popped (D19)
-and its read taken by the bridge (D22, against D6 for a clean miss).
-
-Two changes take most of that off the fill's path, both in cpu_datacache.vhd /
-cpu.vhd and neither touching the port:
-
-* WRITEBACKDONE raises the fill request without waiting for the line to be in
-  the FIFO. The victim's four beats are out of the cache RAM by then (the last
-  is read in WRITEBACK4WRITE), so the fill cannot overwrite what the line
-  still needs.
-* cpu.vhd's scheduler takes a latched data-cache refill before the staged
-  line. The FIFO then holds the fill, then the line; memstate runs the fill
-  first and the line while the pipeline goes on.
-
-What must not overtake the line is unchanged: an uncached access and an
-instruction fill wait for `datacache_wb_busy` exactly as before, a re-miss on
-the victim can only be requested after the fill completes (the cache takes
-one miss at a time), by when the line is in the FIFO ahead of it, and every
-port write is snooped by ram_arb's buffers as before. The fill can never be
-for the victim's own line (they share a set). `tests/wborder` checks all four
-over every set (a9e23e7) and passes on build 47; `bench/ld_miss_dirty64`
-(21.7 ticks today, 12.2 clean) is the board observable.
-
-Expected: about 9 of the 19 clocks off every dirty miss - half of all data
-fills - so a few percent where data misses bind (bzip2's window: 12.5 M
-dirty lines, ~3 %); the line's own ~9 clocks then only delay a request issued
-while it is draining. A posted line write in ram_arb (acknowledged when
-latched, the next read allowed past it with an address check) would hide the
-rest and is the step after.
-
-### Build 48 on the board
-
-Build 48 (bedb278) = build 47 + the two changes above. On m900, seeds 1 and 3
-missed the core clock (-0.285, -0.185 ns) and **seed 5 met it** (core +0.080,
-HDMI +0.061, 37,228 ALMs, 89 %), `output_files/sgiindy-b48-seed5-m900.rbf`, md5
-`5524edcc14752687edea483705d379b3`. Seed 5's worst 300 core-clock endpoints
-(tests/out/hw/b48/pathfamilies-seed5.txt) are REX3 -> `p_wdata` and
-`sgi_memmap` -> `ddr3_mux` - the families that decide every fit - and **no CPU
-path**, so the misses were placement, not the new scheduler order.
-
-cpu-tests as the PROM **2415 / 0**. The benches, Count ticks per load:
-
-| walk | build 47 | **build 48** |
-|---|---:|---:|
-| `ld_miss` (a stream) | 9 | 9 |
-| `ld_miss64` | 12.2 | 12.2 |
-| `ld_miss_dirty` | 18.1 | **14.1** |
-| `ld_miss_dirty64` | 21.7 | **17.5** |
-
-**A dirty victim now costs 5.3 ticks, 10.6 clocks, against 19**: the fill is
-taken before the line, and what is left is the victim's readout (7 clocks)
-and the line's write going ahead of whatever the CPU asks for next. Clean
-misses did not move.
-
-`scripts/perfprobe.sh` on the pristine image, build 47's release bitstream run
-as the same-night control at 23:15 and build 48 at 23:49:
-
-| workload | build 47 | **build 48** | |
-|---|---:|---:|---:|
-| launch to the X login screen | 80 s | 79 s | |
-| 60 x `/bin/ls /` | 3.50 s | **3.35 s** | 1.04x |
-| `ls -lR /usr/lib/X11` into the Console | 5.35 s | **5.15 s** | 1.04x |
-| `xterm -e /bin/true`, cold / warm | 0.644 / 0.373 s | 0.635 / 0.366 s | 1.01 / 1.02x |
-| bzip2 -9 of /unix | 80.69 s | 80.41 s | 1.00x |
-| dd 10 MB off the raw disk | 2.59 s | 2.57 s | |
-| perl loop | 11.42 s | 12.55 s | (see below) |
-| clocks per instruction, fork / scroll / bzip2 | 1.70 / 2.02 / 1.94 | 1.66 / 1.98 / 1.94 | |
-| D-cache fill, clocks on the bus (boot / fork / bzip2) | 18.3 / 18.1 / 18.7 | 18.0 / 17.8 / 18.4 | |
-
-The perl row is section 6's instruction-cache placement lottery again: build
-48's run took **18.2 instruction fills per 1000 instructions** against the
-control's 7.5 (and 15.3 in both of build 47's earlier runs), with fewer data
-fills than the control; nothing build 48 changed touches an instruction fill.
-The gain is where data misses write back - fork, the Console's scrolling -
-and small where they do not.
-
-The rest of the board run, same bitstream: the CD file identical to the ISO;
-IRIX plays audio and halts cleanly; `diskcheck` PASS; `diskstress` PASS.
-Released as **`releases/SGIIndy_20260927.rbf`**. Evidence: tests/out/hw/b48/,
-tests/out/hw/b47ctl/, tests/out/hw/perf-b48/, tests/out/hw/perf-b47ctl/.
+**Next.** A posted line write in `ram_arb` (acknowledged when latched, the
+next read allowed past it with an address check) would hide the rest of a
+dirty miss; early restart would take ~5 clocks off every fill.
