@@ -102,6 +102,7 @@ CPUTEST_V = \
 	$(RTL)/sgi/mc_gio_dma.sv \
 	$(RTL)/sgi/sgi_hpc3.sv \
 	$(RTL)/sgi/hal2.sv \
+	$(RTL)/sgi/hpc3_pbus_dma.sv \
 	$(RTL)/sgi/hpc3_scsi_dma.sv \
 	$(RTL)/sgi/sgi_ioc.sv \
 	$(RTL)/sgi/i8042.sv \
@@ -196,9 +197,28 @@ tb_eeprom:
 HPC3 ?= $(RTL)/sgi/sgi_hpc3.sv
 tb_hpc3:
 	$V --binary --timing $(TBC_W) --unroll-count 2048 --unroll-stmts 20000 --top-module tb_hpc3 --Mdir ./obj_dir_tbhpc3 -o tb_hpc3 \
-	   tb_hpc3.sv $(HPC3) $(RTL)/sgi/hpc3_scsi_dma.sv $(RTL)/sgi/hal2.sv
+	   tb_hpc3.sv $(HPC3) $(RTL)/sgi/hpc3_scsi_dma.sv $(RTL)/sgi/hal2.sv $(RTL)/sgi/hpc3_pbus_dma.sv
 	./obj_dir_tbhpc3/tb_hpc3
 
+# --- the SCSI DMA engine alone, against a memory that answers late --------
+# ram_arb's grant and a DDR3 round trip hold the engine's request for tens of
+# clocks on the board; sim_ram.v answers in one or two. The bench sets both
+# delays and drives stop/FLUSH/go into the windows they open.
+#   make -C verilator tb_scsidma
+#   make -C verilator tb_scsidma SDMA=/tmp/hpc3_scsi_dma_old.sv   (another version of it)
+SDMA ?= $(RTL)/sgi/hpc3_scsi_dma.sv
+tb_scsidma:
+	$V --binary --timing $(TBC_W) --top-module tb_scsidma --Mdir ./obj_dir_tbsdma -o tb_scsidma \
+	   tb_scsidma.sv $(SDMA)
+	./obj_dir_tbsdma/tb_scsidma
+
+# --- ram_arb's instruction prefetch buffer against a memory with contents -----
+# Every word handed to the CPU must be what memory held, with the CPU storing
+# into the buffered lines and a DMA master writing underneath (build 46).
+#   make -C verilator tb_ipf
+tb_ipf:
+	$V --binary --timing $(TBC_W) --top-module tb_ipf --Mdir ./obj_dir_tbipf -o tb_ipf 	   tb_ipf.sv $(RTL)/sgi/ram_arb.sv
+	./obj_dir_tbipf/tb_ipf
 
 # The bench in the shape sgi_scsi.sv instantiates since build 27: the CD slot
 # cached with a 64-sector window and multi-block on (CACHE_CD = 1, SECT2 = 64,
@@ -303,6 +323,21 @@ cpuonly: $(RTL)/cpu/generated/r4300_wrap.v
 hal2test:
 	$V -cc --exe --build -j 0 --Mdir ./obj_dir_hal2 --top-module hal2 	   -O3 -CFLAGS "-O2 -std=c++17" $(CPUTEST_W) 	   --x-assign fast --x-initial fast --noassert 	   -o Vhal2 $(RTL)/sgi/hal2.sv tb_hal2.cpp
 	./obj_dir_hal2/Vhal2
+
+# --- the audio path, end to end ---------------------------------------------
+# sgi_hpc3 with its PBUS DMA channels 0-3 and HAL2 (tb_audio_top.sv flattens
+# the beacon ports), driven through its own PIO decode against a C++ memory
+# that answers after a random latency: IRIX's self-linked rings, the PROM's
+# EOX chain on two channels, codec B's silence, odd-word buffers, stop/start,
+# and the OSD's switch. See the header of tb_audio.cpp.
+#   make -C verilator audiotest
+audiotest:
+	$V -cc --exe --build -j 0 --Mdir ./obj_dir_audio --top-module tb_audio_top \
+	   -O3 -CFLAGS "-O2 -std=c++17" $(CPUTEST_W) --unroll-count 2048 \
+	   --x-assign fast --x-initial fast --noassert \
+	   -o Vtb_audio_top tb_audio_top.sv $(RTL)/sgi/sgi_hpc3.sv $(RTL)/sgi/hal2.sv \
+	   $(RTL)/sgi/hpc3_pbus_dma.sv $(RTL)/sgi/hpc3_scsi_dma.sv tb_audio.cpp
+	./obj_dir_audio/Vtb_audio_top
 
 # --- MC GIO64 DMA fill engine unit test ------------------------------------
 # Checks the engine against a C++ transcription of IRIS's own dma_worker loop,

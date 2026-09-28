@@ -9,9 +9,11 @@
 //  src/hpc3.rs offset constants throughout.
 //
 //  WHAT THIS IS AND IS NOT. This is the register file plus the decode in front
-//  of it. Exactly one channel behind it is real: SCSI channel 0 (sub-block 8,
-//  0x1FB90000), whose registers and descriptor engine live in
-//  hpc3_scsi_dma.sv and which is this core's only bus master. Every other
+//  of it. Two sets of channels behind it are real: SCSI channel 0 (sub-block
+//  8, 0x1FB90000), whose registers and descriptor engine live in
+//  hpc3_scsi_dma.sv, and PBUS DMA channels 0-3 (sub-blocks 0-3), the audio
+//  channels, in hpc3_pbus_dma.sv, feeding HAL2 (hal2.sv, PBUS PIO channels
+//  0-3). The two engines share this chip's one memory port. Every other
 //  channel is plain storage that reads back what was written - enough for the
 //  PROM's power-on tests, and honest about moving no data.
 //
@@ -33,7 +35,9 @@
 //  answer 0 would hide the next thing to build.
 //============================================================================
 
-module sgi_hpc3 (
+module sgi_hpc3 #(
+    parameter int AUDIO_CLK_HZ = 50_000_000
+)(
     input  logic        clk,
     input  logic        reset,
 
@@ -73,6 +77,15 @@ module sgi_hpc3 (
     // SGI: DDR3 debug beacon (docs/29) - the SCSI0 DMA channel's live state.
     output logic [63:0] dbg_scsi0_dma,
 
+    // ---- audio -------------------------------------------------------------
+    // The OSD's audio switch (hal2.sv `present`), and HAL2's DAC: signed
+    // 16-bit, clk domain.
+    input  logic        audio_en,
+    output logic [15:0] audio_l,
+    output logic [15:0] audio_r,
+    // Beacon words: HAL2's two (hal2.sv dbg) and the PBUS engine's.
+    output logic [63:0] dbg_audio [3],
+
     // Combinational: 0 means this offset is not decoded here at all, and the
     // access should fall through to the core's unclaimed-cycle path.
     output logic        claimed
@@ -84,8 +97,9 @@ module sgi_hpc3 (
     localparam logic [18:0] DMA_END       = 19'h20000;
     localparam logic [18:0] GEN_BASE      = 19'h30000;  // intstat, misc, eeprom, bus_error
     localparam logic [18:0] GEN_END       = 19'h30020;
-    localparam logic [18:0] HAL2_BASE     = 19'h58000;  // PBUS PIO channel 0
-    localparam logic [18:0] HAL2_END      = 19'h58400;
+    // PBUS PIO channels 0-3: HAL2 itself, its AES, volume and synth ports.
+    localparam logic [18:0] HAL2_BASE     = 19'h58000;
+    localparam logic [18:0] HAL2_END      = 19'h59000;
     localparam logic [18:0] CFGDMA_BASE   = 19'h5C000;  // 8 channels, stride 0x200
     localparam logic [18:0] CFGDMA_END    = 19'h5D000;
     localparam logic [18:0] CFGPIO_BASE   = 19'h5D000;  // 10 channels, stride 0x100
@@ -195,6 +209,8 @@ module sgi_hpc3 (
     // registers: the arrays below never see them.
     localparam logic [3:0] SUB_SCSI0 = 4'd8;
     wire scsi0_blk = (blk == BLK_DESC || blk == BLK_CTRL) && (sub == SUB_SCSI0);
+    // PBUS DMA channels 0-3, 0x1FB80000-0x1FB87FFF: hpc3_pbus_dma.sv's.
+    wire pbus_blk  = (blk == BLK_DESC || blk == BLK_CTRL) && (sub[3:2] == 2'b00);
 
     // The engine indexes its registers as {is_control_block, index}: 0x0 cbp,
     // 0x1 nbdp, 0x8 bc, 0x9 control, 0xA gio, 0xB dev, 0xC dmacfg, 0xD piocfg.
@@ -214,6 +230,12 @@ module sgi_hpc3 (
     logic [31:0] wval [0:1];
     logic  [1:0] wr_en;
 
+    // The two engines' memory requests, before the arbiter at the bottom.
+    logic        s_req, s_we, s_ack, p_req, p_we, p_ack;
+    logic [31:0] s_addr, p_addr;
+    logic [63:0] s_wdata, p_wdata;
+    logic  [7:0] s_be, p_be;
+
     hpc3_scsi_dma u_scsi0_dma (
         .clk        (clk),
         .reset      (reset),
@@ -227,13 +249,13 @@ module sgi_hpc3 (
         .rd_reg1    (scsi0_reg(1'b1)),
         .rd_data1   (scsi0_rd1),
 
-        .dma_req    (dma_req),
-        .dma_we     (dma_we),
-        .dma_addr   (dma_addr),
-        .dma_wdata  (dma_wdata),
-        .dma_be     (dma_be),
+        .dma_req    (s_req),
+        .dma_we     (s_we),
+        .dma_addr   (s_addr),
+        .dma_wdata  (s_wdata),
+        .dma_be     (s_be),
         .dma_rdata  (dma_rdata),
-        .dma_ack    (dma_ack),
+        .dma_ack    (s_ack),
 
         .dev_req    (scsi_dev_req),
         .dev_dir_in (scsi_dev_dir_in),
@@ -260,7 +282,11 @@ module sgi_hpc3 (
     // so it only ever appears at +0x000C. Nothing has tested this: the PROM
     // polls the WD33C93 and never looks here, and the descriptors it builds do
     // not set XIE, so this whole path can be wrong without the boot noticing.
-    wire [9:0] intstat = {1'b0, scsi_dma_irq, 8'h00};
+    // PBUS channels 0-3 set theirs from descriptors with XIE; kdsp_a2's rings
+    // have none, and the PBUS DMA interrupt is not wired to INT2 - IRIS does
+    // not wire it either, and nothing an Indy runs has been seen to want it.
+    logic [3:0] pbus_int, pbus_act;
+    wire [9:0] intstat = {1'b0, scsi_dma_irq, 4'h0, pbus_int};
 
     // AN IF/ELSE CHAIN, NOT A CASE, and it has to stay one.
     //
@@ -288,7 +314,7 @@ module sgi_hpc3 (
     // engine owns those registers. Neither are HAL2's file, the write-only
     // PBUS ports or an address this module does not claim.
     wire stored = (blk == BLK_GEN) || (blk == BLK_CFGDMA) || (blk == BLK_CFGPIO)
-               || (((blk == BLK_DESC) || (blk == BLK_CTRL)) && !scsi0_blk);
+               || (((blk == BLK_DESC) || (blk == BLK_CTRL)) && !scsi0_blk && !pbus_blk);
 
     // The store's index for the register this access's half w addresses. An
     // if/else chain for the same reason hpc3_rd below is one.
@@ -320,7 +346,13 @@ module sgi_hpc3 (
     function automatic logic [31:0] hpc3_rd(input logic w);
         // Only the blocks that are not in the store reach this: SCSI channel
         // 0's registers, HAL2's revision, and everything else as zero.
-        if ((blk == BLK_DESC) || (blk == BLK_CTRL))
+        if (pbus_blk && (blk == BLK_DESC))
+            hpc3_rd = w ? pb_dp : pb_bp;
+        else if (pbus_blk)
+            // ctrl is the first word of the control group; the rest of the
+            // group reads zero, as IRIS's PbusDmaOps answers it.
+            hpc3_rd = ({addr[4:3], w} == 3'd0) ? pb_ctrl : 32'h0;
+        else if ((blk == BLK_DESC) || (blk == BLK_CTRL))
             hpc3_rd = w ? scsi0_rd1 : scsi0_rd0;
         // HAL2 ANSWERS ITS REVISION REGISTER AND NOTHING ELSE, and that
         // is enough to be listed. There is no audio path behind this and
@@ -354,7 +386,7 @@ module sgi_hpc3 (
         // replaced by w, so its 0x10-granular index is addr[7:4] whichever
         // half is being read.
         else if (blk == BLK_HAL2)
-            hpc3_rd = {16'h0, hal2_rdata};
+            hpc3_rd = {16'h0, w ? hal2_rd1 : hal2_rd0};
         else
             hpc3_rd = 32'h0000_0000;
     endfunction
@@ -413,17 +445,125 @@ module sgi_hpc3 (
     wire        hal2_sel = sel && (blk == BLK_HAL2);
     wire        hal2_we  = hal2_sel && we && (wr_en[0] || wr_en[1]);
     wire [15:0] hal2_wd  = wr_en[0] ? wval[0][15:0] : wval[1][15:0];
-    wire [15:0] hal2_rdata;
+    wire [15:0] hal2_rd0, hal2_rd1;
 
-    hal2 u_hal2 (
-        .clk    (clk),
-        .reset  (reset),
-        .sel    (hal2_sel),
-        .we     (hal2_we),
-        .regsel (addr[7:4]),
-        .wdata  (hal2_wd),
-        .rdata  (hal2_rdata)
+    // HAL2's DMA port into the PBUS engine.
+    logic        x_req, x_we, x_two, x_ack;
+    logic  [1:0] x_ch, x_ok;
+    logic [63:0] x_wdata, x_rdata;
+    logic [63:0] hal2_dbg [2];
+
+    hal2 #(.CLK_HZ(AUDIO_CLK_HZ)) u_hal2 (
+        .clk     (clk),
+        .reset   (reset),
+        .present (audio_en),
+        .sel     (hal2_sel),
+        .we      (hal2_we),
+        .win     (addr[11:10]),
+        .dsel    (addr[7:3]),
+        .wsel    (~wr_en[0]),
+        .wdata   (hal2_wd),
+        .rdata0  (hal2_rd0),
+        .rdata1  (hal2_rd1),
+        .x_req   (x_req),
+        .x_ch    (x_ch),
+        .x_we    (x_we),
+        .x_two   (x_two),
+        .x_wdata (x_wdata),
+        .x_ack   (x_ack),
+        .x_ok    (x_ok),
+        .x_rdata (x_rdata),
+        .audio_l (audio_l),
+        .audio_r (audio_r),
+        .dbg     (hal2_dbg)
     );
+    assign dbg_audio[0] = hal2_dbg[0];
+    assign dbg_audio[1] = hal2_dbg[1];
+
+    //------------------------------------------------------------------
+    // PBUS DMA channels 0-3
+    //------------------------------------------------------------------
+    // Their bp, dp and ctrl are the engine's, not the store's. The word a
+    // write lands on is the addressed one, as for SCSI channel 0: the PROM
+    // and kdsp_a2 both use `sw`.
+    wire        pb_word = aoff[2];
+    wire  [2:0] pb_creg = {addr[4:3], pb_word};
+    wire        pb_wr   = sel && we && pbus_blk && wr_en[pb_word]
+                        && ((blk == BLK_DESC) || (pb_creg == 3'd0));
+    wire [31:0] pb_bp, pb_dp, pb_ctrl;
+    logic [15:0] pb_ndesc;
+    logic [31:0] pb_nwords;
+
+    hpc3_pbus_dma u_pbus_dma (
+        .clk         (clk),
+        .reset       (reset),
+        .pio_we      (pb_wr),
+        .pio_ch      (sub[1:0]),
+        .pio_reg     ((blk == BLK_DESC) ? {1'b0, pb_word} : 2'd2),
+        .pio_wdata   (wval[pb_word]),
+        .pio_rd_ctrl (sel && !we && pbus_blk && (blk == BLK_CTRL) && (pb_creg == 3'd0)),
+        .rd_ch       (sub[1:0]),
+        .rd_bp       (pb_bp),
+        .rd_dp       (pb_dp),
+        .rd_ctrl     (pb_ctrl),
+        .x_req       (x_req),
+        .x_ch        (x_ch),
+        .x_we        (x_we),
+        .x_two       (x_two),
+        .x_wdata     (x_wdata),
+        .x_ack       (x_ack),
+        .x_ok        (x_ok),
+        .x_rdata     (x_rdata),
+        .ch_int      (pbus_int),
+        .ch_act      (pbus_act),
+        .dma_req     (p_req),
+        .dma_we      (p_we),
+        .dma_addr    (p_addr),
+        .dma_wdata   (p_wdata),
+        .dma_be      (p_be),
+        .dma_rdata   (dma_rdata),
+        .dma_ack     (p_ack),
+        .dbg_desc    (pb_ndesc),
+        .dbg_words   (pb_nwords)
+    );
+
+    assign dbg_audio[2] = {pbus_act, pbus_int, 8'h00, pb_ndesc, pb_nwords};
+
+    //------------------------------------------------------------------
+    // The memory port: SCSI channel 0 and the PBUS engine
+    //------------------------------------------------------------------
+    // Both hold their request until acknowledged, so the grant is decided
+    // when the port is idle and then held for that transaction; the answer
+    // goes to whoever holds it. Alternating when both ask: SCSI is feeding a
+    // bus phase with a target waiting, audio a FIFO with a deadline a whole
+    // sample period away, and neither may starve the other. When only SCSI
+    // asks, every signal below is exactly the SCSI channel's, as before.
+    logic busy_m, own_p, last_p;
+    wire  grant_p = busy_m ? own_p : (p_req && (!s_req || !last_p));
+
+    always_ff @(posedge clk) begin
+        if (reset) begin
+            busy_m <= 1'b0;
+            own_p  <= 1'b0;
+            last_p <= 1'b0;
+        end else if (!busy_m) begin
+            if (s_req || p_req) begin
+                busy_m <= 1'b1;
+                own_p  <= grant_p;
+            end
+        end else if (dma_ack) begin
+            busy_m <= 1'b0;
+            last_p <= own_p;
+        end
+    end
+
+    assign dma_req   = busy_m ? (own_p ? p_req : s_req) : (s_req | p_req);
+    assign dma_we    = grant_p ? p_we    : s_we;
+    assign dma_addr  = grant_p ? p_addr  : s_addr;
+    assign dma_wdata = grant_p ? p_wdata : s_wdata;
+    assign dma_be    = grant_p ? p_be    : s_be;
+    assign s_ack     = dma_ack && busy_m && !own_p;
+    assign p_ack     = dma_ack && busy_m &&  own_p;
 
     //------------------------------------------------------------------
     // The store's one access at a time

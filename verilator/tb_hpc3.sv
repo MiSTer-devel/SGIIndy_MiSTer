@@ -56,13 +56,15 @@ sgi_hpc3 dut (
     .dma_rdata (64'd0), .dma_ack (1'b0),
     .scsi_dev_req (1'b0), .scsi_dev_dir_in (1'b0), .scsi_dev_wdata (8'd0),
     .scsi_dev_eop (1'b0), .scsi_dev_ack (), .scsi_dev_rdata (), .scsi_dev_reset (),
-    .scsi_dma_irq (), .dbg_scsi0_dma ()
+    .scsi_dma_irq (), .dbg_scsi0_dma (),
+    // audio: fitted, but with no memory behind the PBUS engine it never plays
+    .audio_en (1'b1), .audio_l (), .audio_r (), .dbg_audio ()
 );
 
 // ---- the map, as the spec gives it ----------------------------------------
 localparam logic [18:0] DMA_END     = 19'h20000;
 localparam logic [18:0] GEN_BASE    = 19'h30000, GEN_END    = 19'h30020;
-localparam logic [18:0] HAL2_BASE   = 19'h58000, HAL2_END   = 19'h58400;
+localparam logic [18:0] HAL2_BASE   = 19'h58000, HAL2_END   = 19'h59000;
 localparam logic [18:0] CFGDMA_BASE = 19'h5C000, CFGDMA_END = 19'h5D000;
 localparam logic [18:0] CFGPIO_BASE = 19'h5D000, CFGPIO_END = 19'h5E000;
 localparam logic [18:0] WRONLY_BASE = 19'h5E000, WRONLY_END = 19'h60000;
@@ -95,8 +97,12 @@ function automatic int key_of(input logic [18:0] a, input int blk, input bit w);
 endfunction
 
 // SCSI channel 0 is sub-block 8 of the DMA space: hpc3_scsi_dma answers for it.
+// PBUS channels 0-3 (sub-blocks 0-3) are hpc3_pbus_dma's, whose ctrl reads
+// status and whose 64-bit writes take only the addressed word; tb_audio is
+// their bench. Neither is storage, and this bench leaves both unmodelled.
 function automatic bit scsi0(input logic [18:0] a, input int blk);
-    scsi0 = (blk == B_DESC || blk == B_CTRL) && (a[16:13] == 4'd8);
+    scsi0 = (blk == B_DESC || blk == B_CTRL)
+         && ((a[16:13] == 4'd8) || (a[16:15] == 2'b00));
 endfunction
 
 // Is the half's read data something this bench can predict?
@@ -267,6 +273,9 @@ function automatic logic [63:0] safe_wd(input logic [18:0] a, input logic [63:0]
     safe_wd = wd;
     if ((a[18:13] == {2'b00, 4'd8}) && a[12] && (a[4:3] == 2'b00))
         safe_wd[31:0] = wd[31:0] & ~32'h0000_0018;
+    // nor start a PBUS audio channel (ch_act_ld, either word)
+    if ((a[18:15] == 4'b0000) && a[12] && (a[4:3] == 2'b00))
+        safe_wd = wd & ~64'h0000_0020_0000_0020;
 endfunction
 
 // ---- the tests ------------------------------------------------------------

@@ -121,6 +121,10 @@ module sgi_scsi #(
     // The OSD's "SCSI cache: Off": every request passes straight through to
     // hps_io, one sector per transaction, as before docs/design/scsi-block-cache.md.
     input  logic                    cache_bypass,
+    // The WD33C93B's DATA IN look-ahead, a runtime instrument (wd33c93.sv).
+    input  logic                    din_lookahead_en,
+    // The DATA IN capture waits for the target's buffers (wd33c93.sv).
+    input  logic                    din_strict,
 
     // SGI: DDR3 debug beacon words (docs/28). [0] bus/HPS live, [1] wd33c93,
     // [2]/[3] target 1 live A/B, [4]/[5] target 6 live A/B, [6] target 1
@@ -131,7 +135,7 @@ module sgi_scsi #(
     // were busy, how long the SCSI bus was, how many bytes crossed it in DATA
     // phases, and the cache's hits / misses / writes. Counters, not state:
     // read twice, subtract, and the difference is the boot's disk seconds.
-    output logic [63:0]             dbg_stat [7]
+    output logic [63:0]             dbg_stat [8]
 );
 
     // ---- port decode -------------------------------------------------------
@@ -158,6 +162,8 @@ module sgi_scsi #(
     // sending a READ - the initiator's look-ahead (scsi.v, dout_ahead_read).
     wire [23:0]            t_ahead     [NUM_TARGETS];
     wire [NUM_TARGETS-1:0] t_ahead_ok;
+    wire [NUM_TARGETS-1:0] t_ready;
+    wire [63:0]            wd_din;
     // Hoisted out of the generate: a runtime index into a generate block is
     // not a constant expression, so the per-target LBA has to live in an
     // array at module scope for the mux below to select from it.
@@ -183,15 +189,18 @@ module sgi_scsi #(
     logic [7:0]  bus_din;
     logic [23:0] bus_din_ahead;
     logic        bus_din_ahead_ok;
+    logic        bus_din_ready;
     always_comb begin
         bus_din          = 8'h00;
         bus_din_ahead    = 24'h0;
         bus_din_ahead_ok = 1'b0;
+        bus_din_ready    = 1'b1;
         for (int t = 0; t < NUM_TARGETS; t++)
             if (t_bsy[t]) begin
                 bus_din          = t_dout[t];
                 bus_din_ahead    = t_ahead[t];
                 bus_din_ahead_ok = t_ahead_ok[t];
+                bus_din_ready    = t_ready[t];
             end
     end
 
@@ -218,6 +227,10 @@ module sgi_scsi #(
         .scsi_din  (bus_din),
         .scsi_din_ahead(bus_din_ahead),
         .scsi_din_ahead_ok(bus_din_ahead_ok),
+        .din_lookahead_en(din_lookahead_en),
+        .scsi_din_ready(bus_din_ready),
+        .din_strict(din_strict),
+        .dbg_din(wd_din),
         .dma_req   (dma_req),
         .dma_dir_in(dma_dir_in),
         .dma_wdata (dma_wdata),
@@ -376,6 +389,7 @@ module sgi_scsi #(
                     // din_ahead).
                     .dout_ahead_read(t_ahead[t]),
                     .dout_ahead_ok  (t_ahead_ok[t]),
+                    .dout_ready     (t_ready[t]),
                     .cd_snd_l       (unused_snd_l),
                     .cd_snd_r       (unused_snd_r),
                     .img_mounted    (img_mounted[t]),
@@ -547,6 +561,7 @@ module sgi_scsi #(
     assign dbg_stat[4] = { st_data_cyc[37:6], cache_writes };
     assign dbg_stat[5] = { st_din_ini[37:6],  st_din_tgt[37:6] };
     assign dbg_stat[6] = { st_dout_ini[37:6], st_dout_tgt[37:6] };
+    assign dbg_stat[7] = wd_din;
 
     // SGI: DDR3 debug beacon assembly (docs/28).
     // [0]: {sd_rd, sd_wr, sd_ack, t_bsy (7 bits each),

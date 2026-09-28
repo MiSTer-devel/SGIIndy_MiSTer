@@ -81,12 +81,21 @@ class Efs:
         direct = [self._ex(*w) for w in raw]
         if numex <= 12:
             return [e for e in direct[:numex] if e[1]]
+        # di_numextents counts the extents in the indirect blocks, and ONLY
+        # those are the file's: IRIX writes an indirect block from its in-core
+        # list into a buffer whose tail it does not clear, so the bytes after
+        # the last extent can be anything the buffer held before - on
+        # 2026-09-27 the tail of libXm.so.1's held entries of the /dev/hdsp
+        # directory. Reading past numex made those look like 27 more extents
+        # and the file "changed on the disk" when nothing in it had.
         out = []
         for bn, length, _off in direct:
             if not length:
                 continue
             data = self._blk(bn, length)
             for i in range(0, len(data) - 7, 8):
+                if len(out) == numex:
+                    return out
                 w0, w1 = struct.unpack_from(">II", data, i)
                 e = self._ex(w0, w1)
                 if e[1]:
@@ -196,4 +205,5 @@ def main():
         raise SystemExit("commands: ls | cat | get | find")
 
 
-main()
+if __name__ == "__main__":
+    main()

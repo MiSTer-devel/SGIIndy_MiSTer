@@ -76,6 +76,25 @@
 //  interrupt and then writes FLUSH, and a model that interrupts again leaves
 //  the bit set and the line in a storm.
 //
+//  FLUSH HOLDS ch_active UNTIL THE BYTES ARE IN MEMORY. IRIX's wd93dma_flush
+//  (kernel.o, IP22) is `ctrl |= FLUSH; while (ctrl & ACTIVE)` - up to 512
+//  reads - and Linux's sgiwd93 dma_stop is the same loop: the bit going to 0
+//  is the driver's word that the buffer is complete. This engine used to clear
+//  it on the write, with the held bytes' memory cycle still tens of clocks
+//  away on the board.
+//
+//  STOP, FLUSH AND ch_reset ARE REQUESTS, TAKEN BY THE ENGINE (stop_req). The
+//  PIO write used to move `dstate` itself, which lost to whatever the engine's
+//  own case assigned in the same clock (a stop landing on D_ADVANCE left the
+//  engine running with ch_active 0), and could leave a memory request in
+//  flight with the engine idle. A go edge after that took the old request's
+//  acknowledge as its descriptor's first word: the new transfer's bytes went
+//  wherever that pointed. Now the engine, once asked, lets an answer already
+//  owed arrive, finishes a byte's pending advance, writes out the held bytes
+//  (not after ch_reset) and only then goes idle - and a go edge waits for that
+//  in go_pend. tb_scsidma drives these windows; sim_ram.v answers too fast
+//  to open them.
+//
 //  WHAT IS NOT MODELLED, deliberately:
 //    - The fifo. The spec's high water mark, the gio/dev fifo pointers and the
 //      whole burst-sizing apparatus exist to keep a 64-bit GIO64 burst busy;
@@ -186,6 +205,11 @@ module hpc3_scsi_dma (
     logic        ctrl_dir;      // control[2]
     logic        ctrl_active;   // control[4]
     logic        ctrl_reset;    // control[6]
+    // The PIO side's requests to the engine, see the header: go_pend is a go
+    // edge not yet started, stop_req a stop/FLUSH/ch_reset not yet finished,
+    // stop_drop says ch_reset (held bytes are dropped, not written), and
+    // flushing holds ch_active up until a FLUSH has drained.
+    logic        go_pend, stop_req, stop_drop, flushing;
 
     // Power-on values from the spec: ch_reset is set, and dmacfg's high water
     // mark comes up at "100" with everything else clear.
@@ -194,7 +218,7 @@ module hpc3_scsi_dma (
     wire [31:0] control = {24'h0, 1'b0,         // 7 parity_error, never set
                                   ctrl_reset,   // 6
                                   1'b0,         // 5 ch_active_mask, write only
-                                  ctrl_active,  // 4
+                                  ctrl_active | flushing, // 4
                                   1'b0,         // 3 flush, self-clearing
                                   ctrl_dir,     // 2
                                   ctrl_endian,  // 1
@@ -293,12 +317,6 @@ module hpc3_scsi_dma (
     typedef enum logic [1:0] { FN_ADVANCE, FN_RUN, FN_IDLE } flnext_t;
     flnext_t fl_next;
 
-    // Stopping or flushing the channel: held bytes are written before the
-    // engine goes idle, and a write already on its way (D_FLUSH, D_FLUSH_W)
-    // just has its destination changed. Spelled out at both PIO sites below
-    // rather than as a task, to keep to what every tool here synthesises.
-    wire stop_in_flush = (dstate == D_FLUSH) || (dstate == D_FLUSH_W);
-
     wire [13:0] count = bc[13:0];
 
     // A byte at physical address A lives in lane A[2:0] of the doubleword at
@@ -331,6 +349,7 @@ module hpc3_scsi_dma (
             wbuf <= 64'h0; wbe <= 8'h0; waddr <= 29'h0;
             rbuf <= 64'h0; raddr <= 29'h0; rvalid <= 1'b0;
             widle <= 11'h0; fl_next <= FN_IDLE;
+            go_pend <= 1'b0; stop_req <= 1'b0; stop_drop <= 1'b0; flushing <= 1'b0;
             dev_reset <= 1'b0;
             dev_rdata <= 8'h0;
             dma_we <= 1'b0; dma_addr <= 32'h0; dma_wdata <= 64'h0; dma_be <= 8'h0;
@@ -370,23 +389,21 @@ module hpc3_scsi_dma (
                         // alone, so a driver can change dir or endian without
                         // stopping a running transfer.
                         if (!pio_wdata[5]) begin
-                            if (pio_wdata[4] && !ctrl_active && !pio_wdata[6]) begin
+                            if (pio_wdata[4] && !ctrl_active && !flushing && !pio_wdata[6]) begin
                                 // The go edge. ch_reset must be clear first;
                                 // the spec requires it and the PROM obeys.
+                                // The engine starts from D_IDLE once the last
+                                // transfer has nothing left in flight.
                                 ctrl_active <= 1'b1;
+                                go_pend     <= 1'b1;
                                 fetch_ptr   <= nbdp;
                                 link_count  <= 5'h0;
                                 eop_lat     <= 1'b0;
                                 rvalid      <= 1'b0;
-                                dstate      <= D_FETCH_LO;
                             end else if (!pio_wdata[4]) begin
                                 ctrl_active <= 1'b0;
-                                if (stop_in_flush || wbe != 8'h0) begin
-                                    fl_next <= FN_IDLE;
-                                    if (!stop_in_flush) dstate <= D_FLUSH;
-                                end else begin
-                                    dstate  <= D_IDLE;
-                                end
+                                go_pend     <= 1'b0;
+                                stop_req    <= 1'b1;
                             end
                         end
 
@@ -395,22 +412,22 @@ module hpc3_scsi_dma (
                             // said. Bytes not yet written are dropped with
                             // the transfer they belonged to.
                             ctrl_active <= 1'b0;
-                            wbe         <= 8'h0;
+                            go_pend     <= 1'b0;
+                            stop_req    <= 1'b1;
+                            stop_drop   <= 1'b1;
+                            flushing    <= 1'b0;
                             rvalid      <= 1'b0;
-                            dstate      <= D_IDLE;
                         end
 
                         // FLUSH. The only fifo is wbuf, so this writes out
                         // whatever it holds and stops the channel - and it
-                        // must NOT interrupt. See the header.
+                        // must NOT interrupt. ch_active reads 1 until it is
+                        // done. See the header.
                         if (pio_wdata[3] && !pio_wdata[6]) begin
                             ctrl_active <= 1'b0;
-                            if (stop_in_flush || wbe != 8'h0) begin
-                                fl_next <= FN_IDLE;
-                                if (!stop_in_flush) dstate <= D_FLUSH;
-                            end else begin
-                                dstate  <= D_IDLE;
-                            end
+                            go_pend     <= 1'b0;
+                            stop_req    <= 1'b1;
+                            flushing    <= 1'b1;
                         end
                     end
                     R_GIO:    gio    <= pio_wdata;
@@ -428,8 +445,46 @@ module hpc3_scsi_dma (
             if (pio_sel && !pio_we && pio_reg == R_CTRL) ctrl_int <= 1'b0;
 
             // ---- the descriptor engine ------------------------------------
-            case (dstate)
-                D_IDLE: ;
+            if (stop_req) begin
+                // Stopping, in order: the answer to a request already made
+                // (it belongs to that request and to nothing after it), a
+                // moved byte's pending advance, the held bytes unless this is
+                // ch_reset, then idle. See the header.
+                if (dma_req) begin
+                    if (dma_ack) begin
+                        if (dstate == D_FLUSH_W) begin
+                            wbe    <= 8'h0;
+                            dstate <= (fl_next == FN_ADVANCE) ? D_ADVANCE : D_IDLE;
+                        end else begin
+                            dstate <= D_IDLE;
+                        end
+                    end
+                end else if (dstate == D_ADVANCE) begin
+                    cbp      <= cbp + 32'd1;
+                    bc[13:0] <= count - 14'd1;
+                    dstate   <= D_IDLE;
+                end else if (wbe != 8'h0 && !stop_drop) begin
+                    dma_req   <= 1'b1;
+                    dma_we    <= 1'b1;
+                    dma_addr  <= {waddr, 3'b000};
+                    dma_wdata <= wbuf;
+                    dma_be    <= wbe;
+                    fl_next   <= FN_IDLE;
+                    dstate    <= D_FLUSH_W;
+                end else begin
+                    wbe       <= 8'h0;
+                    widle     <= 11'h0;
+                    dstate    <= D_IDLE;
+                    stop_req  <= 1'b0;
+                    stop_drop <= 1'b0;
+                    flushing  <= 1'b0;
+                end
+            end else case (dstate)
+                D_IDLE:
+                    if (go_pend && !dma_req) begin
+                        go_pend <= 1'b0;
+                        dstate  <= D_FETCH_LO;
+                    end
 
                 D_FETCH_LO: begin
                     dma_req  <= 1'b1;

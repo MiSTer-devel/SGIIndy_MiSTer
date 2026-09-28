@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 #
-# perfprobe.sh [--tag T] [--fresh PRISTINE.img] [--no-boot] [--skip LIST]
+# perfprobe.sh [--tag T] [--fresh PRISTINE.img] [--no-boot] [--skip LIST] [OPT=VAL ...]
+#
+# OPT=VAL are scripts/setopt.sh settings for the launch (everything else at its
+# default) - e.g. ipf=off for build 46's instruction prefetch A/B.
 #
 # Where does an IRIX session's time go on this core? Boots IRIX with the
 # beacon profiler running (tools/misterdeploy/prof.py), logs in as root by the
@@ -38,7 +41,7 @@ if [ -r scripts/local.env ]; then . scripts/local.env; fi
 : "${MISTER_HOST:?}"; : "${MISTER_SSH_KEY:?}"; : "${MISTER_SSH_USER:=root}"
 : "${MISTER_CORE_FOLDER:=_Unstable}"; : "${RBF_REMOTE:=SGIIndy.rbf}"
 : "${MISTER_HTTP_PORT:=8182}"
-TAG="perf"; FRESH=""; BOOT=1; SKIP=""
+TAG="perf"; FRESH=""; BOOT=1; SKIP=""; OPTS=()
 IMG="/media/fat/games/${MISTER_GAMES_DIR:-SGIIndy}/SGIIndy53.img"
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -47,6 +50,7 @@ while [ $# -gt 0 ]; do
         --img)     IMG="$2"; shift ;;
         --no-boot) BOOT=0 ;;
         --skip)    SKIP="$2"; shift ;;
+        *=*)       OPTS+=("$1") ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
     shift
@@ -69,7 +73,8 @@ for f in ddr3_peek.py fb_poke.py memclear.py irixstate.py bcnread.py efsread.py 
 done
 
 if [ "$BOOT" = 1 ]; then
-    bash scripts/setopt.sh >/dev/null || exit 1
+    bash scripts/setopt.sh ${OPTS[@]+"${OPTS[@]}"} >/dev/null || exit 1
+    say "options: ${OPTS[*]:-defaults}"
     if [ -n "$FRESH" ]; then
         say "restoring $IMG from $FRESH"
         # Restore IN PLACE, with the image closed first. Renaming a fresh copy over

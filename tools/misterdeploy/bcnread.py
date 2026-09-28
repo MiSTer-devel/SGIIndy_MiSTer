@@ -30,11 +30,16 @@ Usage (on the MiSTer):
     bcnread.py                one decoded sample
     bcnread.py --loop 30 --interval 2      sample for a minute
     bcnread.py --raw          just the hex words
-    bcnread.py --perf         (ver >= 10, docs/design/cpu-speed-tlb-icache.md; 36-39 from ver 12, build 37) the performance counters,
+    bcnread.py --perf         (ver >= 10, docs/design/cpu-speed-tlb-icache.md; 36-39 from ver 12, build 37;
+                              word 47's instruction prefetch hits and fills appended from ver 16) the performance counters,
                               raw, as one line of 28 integers (30 from
                               ver 11, word 35); two of these
                               a workload apart are the workload's breakdown:
                               perfdiff.py BEFORE AFTER on the host
+    bcnread.py --audio        (ver >= 15) one line: HAL2 and the PBUS DMA engine -
+                              codec A frames played, DMA ops, under/overruns,
+                              the peak and last sample, running channels,
+                              descriptors fetched and words moved
     bcnread.py --stats        one line: the disk-time counters as seconds
                               (the difference of two of these over a boot is
                               the boot's disk time; scripts/irixrate.sh
@@ -50,7 +55,7 @@ _m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(_m)
 
 BASE = 0x35800000
-NWORDS = 43
+NWORDS = 49
 CLK_HZ = 50_000_000          # clk_sys; the x64 counters are in units of 64 cycles
 PHASES = ["IDLE", "CMD_IN", "DATA_OUT", "DATA_IN", "STATUS", "MSG_IN", "TB", "MSG_OUT"]
 DSTATES = ["IDLE", "FETCH_LO", "FETCH_LO_W", "FETCH_HI", "FETCH_HI_W", "EVAL",
@@ -247,6 +252,26 @@ def stats_line(ws):
                data_b / 1e6, rate, hits, misses, writes))
 
 
+def audio_line(ws):
+    """Words 43-45 (ver 15): rtl/sgi/hal2.sv dbg and rtl/sgi/sgi_hpc3.sv."""
+    w43, w44, w45 = ws[43:46]
+    last = bits(w44, 15, 0)
+    last = last - 0x10000 if last & 0x8000 else last
+    return ("audio: frames=%d ops=%d underruns=%d overruns=%d peak=%d last=%d | "
+            "pbus running=0x%x int=0x%x descriptors=%d words=%d"
+            % (bits(w43, 63, 32), bits(w43, 31, 0), bits(w44, 63, 48),
+               bits(w44, 47, 32), bits(w44, 31, 16), last,
+               bits(w45, 63, 60), bits(w45, 59, 56), bits(w45, 47, 32),
+               bits(w45, 31, 0)))
+
+
+def din_line(ws):
+    """Word 46 (ver 15): the WD33C93B's DATA IN capture guard (wd33c93.sv dbg_din)."""
+    w = ws[46]
+    return ("din: waited %d clocks for the target's buffers, %d captures while not "
+            "ready, %d forced" % (bits(w, 63, 32), bits(w, 31, 16), bits(w, 15, 0)))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--loop", type=int, default=1)
@@ -254,6 +279,7 @@ def main():
     ap.add_argument("--raw", action="store_true")
     ap.add_argument("--stats", action="store_true")
     ap.add_argument("--perf", action="store_true")
+    ap.add_argument("--audio", action="store_true")
     a = ap.parse_args()
     for i in range(a.loop):
         ws = rdwords()
@@ -268,12 +294,28 @@ def main():
                 last = 40 if ver >= 12 else 36 if ver >= 11 else 35
                 for w in ws[21:last]:
                     vals += [bits(w, 63, 32), bits(w, 31, 0)]
+                # ver 16 (build 46): word 47, {prefetch-buffer hits, prefetching
+                # fills}, appended so perfdiff.py's positions do not move
+                if ver >= 16:
+                    vals += [bits(ws[47], 63, 32), bits(ws[47], 31, 0)]
+                # ver 17 (build 47): word 48, the data buffer's {hits, stream fills}
+                if ver >= 17:
+                    vals += [bits(ws[48], 63, 32), bits(ws[48], 31, 0)]
                 print("perf %.3f beat=%d %s" % (time.time(), bits(ws[0], 31, 0),
                                                " ".join(str(v) for v in vals)))
+        elif a.audio:
+            if bits(ws[0], 63, 48) != 0xBEC0 or bits(ws[0], 47, 40) < 15:
+                print("audio: no counters (beacon ver %d, need 15)" % bits(ws[0], 47, 40))
+            else:
+                print("%s %s" % (time.strftime("%H:%M:%S"), audio_line(ws)))
+                print("%s %s" % (time.strftime("%H:%M:%S"), din_line(ws)))
         elif a.stats:
             if bits(ws[0], 63, 48) != 0xBEC0 or bits(ws[0], 47, 40) < 9:
                 print("scsi: no stats (beacon ver %d, need 9)" % bits(ws[0], 47, 40))
             else:
+                # The guard's line first: scripts take the stats line with tail -1.
+                if bits(ws[0], 47, 40) >= 15:
+                    print(din_line(ws))
                 print(stats_line(ws))
         else:
             stamp = time.strftime("%H:%M:%S")

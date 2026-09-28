@@ -146,6 +146,12 @@ module r4300_bus
     // main memory is asked for one: the data cache writes a dirty line back
     // to where it filled it from.
     output logic [191:0] bus_wdata3,
+    // The request is an INSTRUCTION line fill (mem_size "101"), held with the
+    // payload: ram_arb's prefetch buffer answers and fetches only these
+    // (build 46).
+    output logic        bus_ifill,
+    // ...and a DATA line fill (mem_size "100"), for its stream buffer (build 47).
+    output logic        bus_dfill,
     input  logic [63:0] bus_rdata,
     input  logic        bus_ack,
     // With bus_ack: this is the responder's final word for the request. A
@@ -206,6 +212,8 @@ module r4300_bus
         if (reset) begin
             state           <= S_IDLE;
             bus_req         <= 1'b0;
+            bus_ifill       <= 1'b0;
+            bus_dfill       <= 1'b0;
             mem_done        <= 1'b0;
             fill_grant      <= 1'b0;
         end else begin
@@ -218,6 +226,8 @@ module r4300_bus
                     if (mem_request) begin
                         bus_req   <= 1'b1;
                         bus_we    <= ~mem_rnw;
+                        bus_ifill <= is_fill && (mem_size == SZ_ILINE_X);
+                        bus_dfill <= is_fill && (mem_size == SZ_ILINE);
                         if (is_fill) begin
                             // Every beat is a whole doubleword, so the offset
                             // within one is zero for all of them.

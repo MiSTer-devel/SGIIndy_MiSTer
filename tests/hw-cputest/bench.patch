@@ -20,7 +20,7 @@ diff -ruN a/harness/tests.c b/harness/tests.c
 diff -ruN a/tests/bench/bench.c b/tests/bench/bench.c
 --- a/tests/bench/bench.c	1969-12-31 19:00:00.000000000 -0500
 +++ b/tests/bench/bench.c	2026-09-02 11:00:26.580477000 -0400
-@@ -0,0 +1,240 @@
+@@ -0,0 +1,312 @@
 +/* bench — throughput numbers for the working machine, printed, not judged.
 + *
 + * ADDED FOR THE MiSTer CORE by tests/hw-cputest/bench.patch; the suite
@@ -43,7 +43,15 @@ diff -ruN a/tests/bench/bench.c b/tests/bench/bench.c
 + *   bench/ld_uncached  the same lw loop through KSEG1 - a bus read per load
 + *   bench/st_uncached  the same sw loop through KSEG1 - a bus write per store
 + *   bench/ld_miss      one lw per 32-byte stride across the 256 KB scratch
-+ *                      region - every load a refill: the DDR3 round trip
++ *                      region - every load a refill: the DDR3 round trip.
++ *                      Then three more walks over the same region:
++ *                      ld_miss64, one lw per 64 bytes - no two misses are
++ *                      neighbours, so no prefetch buffer answers one;
++ *                      ld_miss_dirty and ld_miss_dirty64, lw then sw into
++ *                      the line just loaded, so every miss of the timed
++ *                      pass evicts a dirty line: a writeback in front of
++ *                      each fill. Their difference from ld_miss / ld_miss64
++ *                      is what a dirty victim costs.
 + *   bench/count_rate   Count ticks across two DS1386 seconds - Count vs the
 + *                      wall clock, with no help from the host
 + *
@@ -138,6 +146,44 @@ diff -ruN a/tests/bench/bench.c b/tests/bench/bench.c
 +    return v;
 +}
 +
++/* The same walk at any stride (a multiple of it must span [p, end)). */
++static u32 __attribute__((noinline)) loop_lw_step(const u32 *p, const u32 *end, u32 step)
++{
++    u32 v = 0;
++    __asm__ __volatile__(
++        ".set push\n\t.set noreorder\n"
++        "1:\n\t"
++        "lw %0,0(%1)\n\t"
++        "addu %1,%1,%3\n\t"
++        "bne %1,%2,1b\n\t"
++        "nop\n\t"
++        ".set pop"
++        : "+r"(v), "+r"(p)
++        : "r"(end), "r"(step)
++        : "memory");
++    return v;
++}
++
++/* lw, then sw into the line the load just brought in: the walk leaves every
++ * line it touches dirty. */
++static u32 __attribute__((noinline)) loop_lwsw_step(u32 *p, const u32 *end, u32 step)
++{
++    u32 v = 0;
++    __asm__ __volatile__(
++        ".set push\n\t.set noreorder\n"
++        "1:\n\t"
++        "lw %0,0(%1)\n\t"
++        "sw %0,4(%1)\n\t"
++        "addu %1,%1,%3\n\t"
++        "bne %1,%2,1b\n\t"
++        "nop\n\t"
++        ".set pop"
++        : "+r"(v), "+r"(p)
++        : "r"(end), "r"(step)
++        : "memory");
++    return v;
++}
++
 +static void report(const char *name, u32 instrs, u32 ticks)
 +{
 +    con_printf("  bench/%s: %u instr, %u ticks, %u ticks/kinstr\n",
@@ -205,6 +251,32 @@ diff -ruN a/tests/bench/bench.c b/tests/bench/bench.c
 +    t1 = cp0_count();
 +    con_printf("  bench/ld_miss: %u loads, %u ticks, %u ticks/load\n",
 +               loads, t1 - t0, (t1 - t0) / loads);
++
++    /* Each walk once untimed, once timed, as above. After an lw+sw walk the
++     * cache holds only dirty lines of the region, so every miss of its timed
++     * pass writes one back first. Tenths, because the differences are a few
++     * ticks: Count runs at half the pipeline clock. */
++    {
++        static const struct { const char *name; u32 step, dirty; } w[] = {
++            { "ld_miss64",       64, 0 },
++            { "ld_miss_dirty",   32, 1 },
++            { "ld_miss_dirty64", 64, 1 },
++        };
++        u32 *wbeg = (u32 *)_scratch_start;
++        u32 span = (u32)_scratch_end - (u32)_scratch_start;
++        for (unsigned i = 0; i < sizeof w / sizeof w[0]; i++) {
++            u32 n = span / w[i].step;
++            if (w[i].dirty) (void)loop_lwsw_step(wbeg, end, w[i].step);
++            else            (void)loop_lw_step(wbeg, end, w[i].step);
++            t0 = cp0_count();
++            if (w[i].dirty) (void)loop_lwsw_step(wbeg, end, w[i].step);
++            else            (void)loop_lw_step(wbeg, end, w[i].step);
++            t1 = cp0_count();
++            con_printf("  bench/%s: %u loads, %u ticks, %u.%u ticks/load\n",
++                       w[i].name, n, t1 - t0, (t1 - t0) / n,
++                       ((t1 - t0) * 10u / n) % 10u);
++        }
++    }
 +    CHECK(1);
 +}
 +

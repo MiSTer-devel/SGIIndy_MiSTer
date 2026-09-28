@@ -1740,7 +1740,39 @@ begin
                   writefifo_issue_pending <= '0';
                   writefifo_issue_wb      <= '0';
                end if;
-            elsif (datacache_wb_fifo_count = 4) then
+            -- SGI (build 48): A DIRTY MISS'S FILL GOES AHEAD OF ITS VICTIM.
+            -- cpu_datacache raises the fill as soon as the victim's four beats
+            -- are out of its RAM, in the clock the last one is staged here, so
+            -- the fill is latched just below (datacache_wb_busy) and, next
+            -- clock, issued before the line - which waits the one clock the
+            -- request is still a bare pulse. The FIFO then holds the fill and
+            -- then the line, and memstate reads first. Nothing else moves:
+            -- uncached accesses and instruction fills still wait for
+            -- datacache_wb_busy, i.e. for the line to be in the FIFO, and the
+            -- cache cannot miss again before its fill is done. The fill is
+            -- never for the victim's line (they share a set). tests/wborder.
+            elsif (datacache_request_latched = '1') then
+                if (writefifo_schedule_ready = '1') then
+                   writefifo_issue_pending      <= '1';
+                   writefifo_issue_wb           <= '0';
+                   writefifo_Din( 95 downto 64) <= std_logic_vector(datacache_address_latched);
+                  writefifo_Din(104)           <= '1';
+                  writefifo_Din(105)           <= '1';
+                  writefifo_Din(106)           <= '1';
+                  writefifo_Din(107)           <= '1';
+
+                  -- A cache cannot normally issue a second miss while its
+                  -- first is outstanding, but retaining a simultaneous pulse
+                  -- here makes that interface lossless as well.
+                  if (datacache_request = '1') then
+                     datacache_request_latched <= '1';
+                     datacache_address_latched <=
+                        datacache_reqAddr(31 downto 5) & "00000";
+                  else
+                     datacache_request_latched <= '0';
+                  end if;
+               end if;
+            elsif (datacache_wb_fifo_count = 4 and datacache_request = '0') then
                -- SGI: A DIRTY LINE GOES BACK AS ONE TRANSACTION (build 38).
                -- Its four beats used to be four write FIFO entries, and each
                -- paid the whole trip - FIFO, memstate, r4300_bus, ram_arb,
@@ -1774,27 +1806,6 @@ begin
                -- Reserve the scheduler while the line's four beats are
                -- captured into the staging queue.
                null;
-             elsif (datacache_request_latched = '1') then
-                if (writefifo_schedule_ready = '1') then
-                   writefifo_issue_pending      <= '1';
-                   writefifo_issue_wb           <= '0';
-                   writefifo_Din( 95 downto 64) <= std_logic_vector(datacache_address_latched);
-                  writefifo_Din(104)           <= '1';
-                  writefifo_Din(105)           <= '1';
-                  writefifo_Din(106)           <= '1';
-                  writefifo_Din(107)           <= '1';
-
-                  -- A cache cannot normally issue a second miss while its
-                  -- first is outstanding, but retaining a simultaneous pulse
-                  -- here makes that interface lossless as well.
-                  if (datacache_request = '1') then
-                     datacache_request_latched <= '1';
-                     datacache_address_latched <=
-                        datacache_reqAddr(31 downto 5) & "00000";
-                  else
-                     datacache_request_latched <= '0';
-                  end if;
-               end if;
              elsif (mem1_request_latched = '1') then
                 if (writefifo_schedule_ready = '1') then
                    writefifo_issue_pending      <= '1';

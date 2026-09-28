@@ -39,11 +39,13 @@ reference disagree, the reference is current.
 | [SCSI block cache](design/scsi-block-cache.md) | the per-target read-ahead/write-behind cache between the SCSI targets and the SD card |
 | [SCSI synchronous negotiation](design/scsi-sync-negotiation.md) | a fifth of the boot lost to a failing negotiation, and the fix |
 | [Speed: TLB, instruction cache, counters](design/cpu-speed-tlb-icache.md) | where an IRIX session's time goes, measured |
-| [Cache fill latency](design/cache-fill-latency.md) | a line fill's clocks accounted for, and line writes |
+| [Cache fill latency](design/cache-fill-latency.md) | a line fill's clocks accounted for, line writes, the prefetch buffers, and a dirty miss's fill ahead of its victim |
 | [R4600 accuracy, the clock, the disk path](design/r4600-accuracy-clock-disk.md) | the CPU against real Indys, the DS1386, the disk byte path |
 | [HPC3's register file](design/hpc3-register-file.md) | moving HPC3's storage into block RAM |
 | [REX3 rendering](design/rex3-rendering.md) | the graphics engine's full command set, and the bench that checks it against IRIS |
 | [REX3 source audit](design/rex3-source-audit.md) | REX3 against SGI's specs, the guest's own GL libraries, IRIS and MAME, and the plan that followed |
+| [Audio](design/audio.md) | HAL2 and HPC3's PBUS DMA: what the PROM and IRIX's audio driver were read to need, the sample path, and the bench that plays the PROM's startup tune |
+| [Ethernet plan (draft)](design/ethernet-plan.md) | not built yet: the SEEQ 80C03 and HPC3's Ethernet DMA in RTL, a frame mailbox to Main, the MAC address and OSD requirements, phases and budget |
 
 ## History
 

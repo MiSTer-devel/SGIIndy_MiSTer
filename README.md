@@ -17,14 +17,14 @@ programs drawn by a reimplementation of the Newport (XL) graphics board.
 | **Memory** | 32, 48 or 64 MB |
 | **Storage** | the WD33C93 SCSI controller with two disks (SCSI IDs 1 and 2) and a CD-ROM drive (SCSI ID 6), all as image files on the SD card |
 | **Clock** | the Dallas DS1386 real-time clock, set from the MiSTer's clock at every start |
+| **Sound** | the HAL2 audio processor fed by HPC3's PBUS DMA: the PROM's startup chime, and IRIX's audio (`kdsp_a2`) at 48 kHz stereo through the MiSTer's audio output, with IRIX's volume control |
 
 ### Not there yet
 
 - **Networking**: IRIX sees `ec0` but there is no Ethernet behind it, so it
   reports `no carrier`.
-- **Sound**: the HAL2 audio processor is not implemented. The core tells the
-  PROM and IRIX there is no audio hardware, and nothing reaches the MiSTer's
-  audio output.
+- **Sound input and digital audio**: the analogue and AES inputs record
+  silence, and the AES output goes nowhere.
 - **Saved PROM settings**: the PROM's environment (`setenv`) is not kept when
   the core is reloaded. The defaults boot from the disk at SCSI ID 1, which is
   all IRIX needs.
@@ -34,12 +34,13 @@ programs drawn by a reimplementation of the Newport (XL) graphics board.
   (the MiSTer scaler converts it to your HDMI mode).
 - Parallel port, ISDN, video capture (VINO) and IndyCam are not implemented.
 
-### Known bug
+### Fixed since the first release
 
-**A disk read can rarely come back with two bytes wrong.** Installing IRIX from
-the CD, `inst`'s checksums catch exactly one file with the last 32-bit word of a
-disk block half overwritten, the same way every time; the CD image is proven
-good. Until it is fixed, keep a backup copy of your disk image.
+**CD reads could come back with a byte wrong.** Installing IRIX from the CD,
+`inst`'s checksums caught one file with the last word of a disk block damaged,
+the same way every time. The SCSI controller could take a byte before the
+drive's buffer was ready; that is fixed (the file now copies off the CD
+bit-identical). Keeping a backup copy of your disk image is still wise.
 
 ## Requirements
 
@@ -94,6 +95,7 @@ wait: the PROM boots it on its own.
 | **Video debug** | *Raw index* shows the frame buffer's colour indices without the palette |
 | **UART debug** | test patterns on the UART pins, for checking a serial cable |
 | **SCSI cache** | *On* caches disk blocks in the FPGA, which makes disk access much faster |
+| **Audio** | *On* fits the HAL2 audio processor. *Off* makes the machine report no audio hardware, so the PROM plays no chime and IRIX loads no audio driver - the way out if audio ever misbehaves. Takes effect at the next reset |
 | **Aspect ratio** | how the scaler fits the picture |
 | **Reset** | resets the machine. Shut IRIX down first - see below |
 
@@ -108,6 +110,11 @@ time the core starts.
   session can leave the root filesystem needing a long `fsck` on the next boot.
 - **Back up your disk image.** Keep a copy of a freshly installed image; it is
   the quickest way back from a damaged filesystem.
+- **Sound on an existing IRIX image needs one step.** IRIX links its audio
+  driver into the kernel only if the audio hardware answers when the kernel is
+  built, and images set up on earlier versions of this core (which reported no
+  audio) have a kernel without it. With *Audio* on, log in as root, run
+  `/etc/autoconfig -f`, and reboot (`init 6`). A fresh install includes it.
 - The display is 1280x1024; the MiSTer scaler fits it to your screen.
 - The keyboard and mouse are MiSTer's USB devices, presented to IRIX as the
   Indy's PS/2 keyboard and mouse.

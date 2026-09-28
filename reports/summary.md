@@ -6,9 +6,9 @@ tables; the full reports stay in `output_files/`.
 
 | | |
 |---|---|
-| bitstream | `SGIIndy_20260918.rbf`, 4383900 bytes, md5 `5b7d7f277c9e941a3a1000994c39cc05` |
-| built | 2026-09-18 14:29 |
-| fitter seed | 1 |
+| bitstream | `SGIIndy_20260927.rbf`, 4412476 bytes, md5 `5524edcc14752687edea483705d379b3` |
+| built | 2026-09-27 23:44 |
+| fitter seed | 5 |
 | Quartus | 17.0.2 Build 602 07/19/2017 SJ Lite Edition |
 | device | 5CSEBA6U23I7 (Cyclone V) |
 
@@ -16,11 +16,11 @@ tables; the full reports stay in `output_files/`.
 
 | resource | used |
 |---|---|
-| Logic utilization (in ALMs) | 35,554 / 41,910 ( 85 % ) |
-| Total registers | 41125 |
-| Total block memory bits | 3,804,923 / 5,662,720 ( 67 % ) |
-| Total RAM Blocks | 485 / 553 ( 88 % ) |
-| Total DSP Blocks | 59 / 112 ( 53 % ) |
+| Logic utilization (in ALMs) | 37,228 / 41,910 ( 89 % ) |
+| Total registers | 42434 |
+| Total block memory bits | 3,805,947 / 5,662,720 ( 67 % ) |
+| Total RAM Blocks | 487 / 553 ( 88 % ) |
+| Total DSP Blocks | 63 / 112 ( 56 % ) |
 | Total PLLs | 3 / 6 ( 50 % ) |
 | Total pins | 145 / 314 ( 46 % ) |
 
@@ -31,13 +31,13 @@ must be positive; a negative one is a failed timing check.
 
 | clock | setup | hold | recovery | removal | min pulse width |
 |---|---:|---:|---:|---:|---:|
-| HDMI pixel clock | 0.032 | 0.249 | 4.558 | 1.115 | 1.939 |
-| core clock (clk_sys, 50 MHz) | 0.273 | 0.243 | 7.765 | 0.976 | 8.561 |
-| HPS bridge clock | 3.769 | 0.396 | 7.854 | 1.266 | 3.589 |
-| SPI (HPS link) | 5.915 | 0.355 |  |  | 4.259 |
-| FPGA_CLK1_50 | 7.412 | 0.395 | 16.658 | 1.399 | 9.204 |
-| FPGA_CLK2_50 | 11.418 | 0.275 |  |  | 9.203 |
-| audio clock | 22.182 | 0.253 |  |  | 18.922 |
+| HDMI pixel clock | 0.061 | 0.257 | 3.489 | 0.650 | 1.931 |
+| core clock (clk_sys, 50 MHz) | 0.080 | 0.214 | 8.147 | 0.801 | 8.559 |
+| HPS bridge clock | 4.106 | 0.325 | 6.697 | 2.053 | 3.589 |
+| SPI (HPS link) | 6.229 | 0.433 |  |  | 4.204 |
+| FPGA_CLK1_50 | 8.060 | 0.293 | 16.623 | 0.958 | 9.210 |
+| FPGA_CLK2_50 | 12.015 | 0.419 |  |  | 9.219 |
+| audio clock | 13.732 | 0.236 |  |  | 18.904 |
 
 **Timing met in every check.**
 
@@ -49,19 +49,19 @@ HPS bridges.
 
 | block | instance | ALMs | registers | M10K | DSP |
 |---|---|---:|---:|---:|---:|
-| **the whole machine** | `u_core` | 24206.8 | 25331 | 391 | 26 |
-| eeprom_93c56 | `u_eeprom` | 102.0 | 115 | 1 | 0 |
-| i8042 | `u_kbd` | 147.2 | 132 | 1 | 0 |
-| newport | `u_newport` | 5541.1 | 5874 | 202 | 8 |
-| r4300_bus | `u_bus` | 129.4 | 427 | 0 | 0 |
-| r4300_wrap | `u_cpu` | 9206.7 | 9401 | 33 | 18 |
-| ram_arb | `u_ram_arb` | 191.9 | 5 | 0 | 0 |
-| sgi_ds1386 | `u_rtc` | 220.5 | 225 | 8 | 0 |
-| sgi_hpc3 | `u_hpc3` | 804.7 | 1248 | 2 | 0 |
-| sgi_ioc | `u_ioc` | 356.5 | 497 | 0 | 0 |
-| sgi_mc | `u_mc` | 1494.9 | 1846 | 0 | 0 |
-| sgi_memmap | `u_memmap` | 103.0 | 4 | 0 | 0 |
-| sgi_memmap | `u_memmap_dma` | 183.9 | 0 | 0 | 0 |
-| sgi_scc | `u_scc` | 422.0 | 828 | 0 | 0 |
-| sgi_scsi | `u_scsi0` | 4748.3 | 3858 | 144 | 0 |
+| **the whole machine** | `u_core` | 25791.9 | 26671 | 393 | 30 |
+| eeprom_93c56 | `u_eeprom` | 101.2 | 117 | 1 | 0 |
+| i8042 | `u_kbd` | 140.0 | 134 | 1 | 0 |
+| newport | `u_newport` | 5606.4 | 5832 | 202 | 8 |
+| r4300_bus | `u_bus` | 134.2 | 421 | 0 | 0 |
+| r4300_wrap | `u_cpu` | 9331.1 | 9339 | 33 | 18 |
+| ram_arb | `u_ram_arb` | 317.6 | 239 | 2 | 0 |
+| sgi_ds1386 | `u_rtc` | 213.0 | 223 | 8 | 0 |
+| sgi_hpc3 | `u_hpc3` | 1841.8 | 2155 | 2 | 4 |
+| sgi_ioc | `u_ioc` | 358.8 | 496 | 0 | 0 |
+| sgi_mc | `u_mc` | 1458.8 | 1723 | 0 | 0 |
+| sgi_memmap | `u_memmap` | 143.8 | 5 | 0 | 0 |
+| sgi_memmap | `u_memmap_dma` | 101.6 | 0 | 0 | 0 |
+| sgi_scc | `u_scc` | 424.9 | 819 | 0 | 0 |
+| sgi_scsi | `u_scsi0` | 4949.1 | 4020 | 144 | 0 |
 

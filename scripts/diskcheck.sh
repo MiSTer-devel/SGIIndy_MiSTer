@@ -121,4 +121,18 @@ rsh "sleep 75"
 rep "---- sumcheck on the board ----"
 rsh "cd $TMPD; python3 sumcheck.py '$IMG' $SUMS $SRC $COPY $FILES" 2>&1 | tee -a "$OUT"
 grep -q "^DISKCHECK " "$OUT" || { rep "DISKCHECK NO VERDICT (the checker printed nothing)"; exit 1; }
+
+# A FAILURE KEEPS ITS EVIDENCE. Build 46's run (2026-09-27) found libX11.so.1
+# changed on the image although IRIX had read it right - the stray write - and
+# the next script restored the image over it before anyone looked. Now: every
+# block that differs from the pristine image, with its owner and a FOREIGN
+# verdict (efsdiff.py), and a copy of the used image kept on the card.
+if grep -q "^DISKCHECK FAIL" "$OUT" && [ -n "$FRESH" ]; then
+    pusht tools/misterdeploy/efsdiff.py
+    rep "---- efsdiff against $FRESH ----"
+    rsh "cd $TMPD; python3 efsdiff.py '$IMG' '$FRESH' --max 60 --src /unix --copies /unix $COPY" 2>&1 | tee -a "$OUT"
+    KEEP="${IMG%.img}-fail-$(date +%Y%m%d-%H%M%S).img"
+    rep "keeping the used image as $KEEP"
+    rsh "cp '$IMG' '$KEEP' && sync && ls -l '$KEEP'" 2>&1 | tee -a "$OUT"
+fi
 say "report -> $OUT"

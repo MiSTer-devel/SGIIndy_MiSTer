@@ -50,6 +50,14 @@ Why, in the RTL:
   MiSTer's own last octet in it (without the file, `08:00:69:12:34:56`).
   `sgi_ds1386.sv` writes it into device bytes `0x13A`–`0x13F` in the three
   clocks after every reset, and `eeprom_93c56.sv` into its words `0x7D`–`0x7F`.
+- **The `volume` variable is seeded once, on the first reset after a load.**
+  The PROM plays its startup tune only if `volume` (PROM offset `0xE8`) reads
+  non-zero, and it reads the raw field *before* its checksum check writes the
+  defaults - so with an empty NVRAM the first boot would be silent and only a
+  reset would play the chime. `sgi_ds1386.sv` writes the PROM's default, "80",
+  into device bytes `0x128`-`0x129` on that first reset, as a battery would
+  have kept it; after that a `setenv volume 0` lasts until the next reload
+  ([audio.md](../design/audio.md)).
 - **The EEPROM's array has no reset path either**, and its power-up contents
   are the erased part plus `CACHSZ_REG` = 0 — no secondary cache, which the
   PROM reads because `Config` reports none.

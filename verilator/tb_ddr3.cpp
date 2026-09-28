@@ -303,10 +303,12 @@ int main(int argc, char **argv)
                         m->shadow[a] = v;
                     }
                 } else if (m->burst != 4 || port_burst != 4 || a % 32) {
-                    static const int bursts[4] = {1, 2, 4, 4};
-                    m->burst = bursts[rng() % 4];
+                    // 12: ram_arb's prefetching instruction fill (build 46), a
+                    // line and the two after it, from a line boundary.
+                    static const int bursts[5] = {1, 2, 4, 4, 12};
+                    m->burst = bursts[rng() % 5];
                     port_burst = m->burst;
-                    a &= ~(uint32_t)(m->burst * 8 - 1);      // line-aligned
+                    a &= ~(uint32_t)((m->burst == 12 ? 32 : m->burst * 8) - 1);   // line-aligned
                 } else {
                     ram_lines_checked++;
                 }

@@ -36,7 +36,7 @@ module sim_ram
     input  wire [31:0] addr,
     input  wire [63:0] wdata,
     input  wire  [7:0] be,
-    input  wire  [2:0] burst,     // words per read, 1..4; 0 reads as 1
+    input  wire  [3:0] burst,     // words per read, 1..4, or 12 (ram_arb's prefetch); 0 reads as 1
     // A write with burst = 4 is a line write (build 38): wdata at addr, then
     // wdata3's three words at the next three, acknowledged once.
     input  wire [191:0] wdata3,
@@ -51,7 +51,7 @@ module sim_ram
         (input int unsigned space, input int unsigned addr,
          input longint unsigned data, input byte unsigned be);
 
-    reg  [2:0] left = 3'd0;        // words still owed after this one
+    reg  [3:0] left = 4'd0;        // words still owed after this one
     reg [31:0] next_addr = 32'd0;
 
     always @(posedge clk) begin
@@ -60,7 +60,7 @@ module sim_ram
         if (req) begin
             if (we) begin
                 sgi_dpi_write(space, addr, wdata, be);
-                if (burst == 3'd4) begin
+                if (burst == 4'd4) begin
                     sgi_dpi_write(space, addr + 32'd8,  wdata3[63:0],    8'hFF);
                     sgi_dpi_write(space, addr + 32'd16, wdata3[127:64],  8'hFF);
                     sgi_dpi_write(space, addr + 32'd24, wdata3[191:128], 8'hFF);
@@ -69,15 +69,15 @@ module sim_ram
             end else begin
                 rdata     <= sgi_dpi_read(space, addr);
                 ack       <= 1'b1;
-                last      <= (burst <= 3'd1);
-                left      <= (burst <= 3'd1) ? 3'd0 : burst - 3'd1;
+                last      <= (burst <= 4'd1);
+                left      <= (burst <= 4'd1) ? 4'd0 : burst - 4'd1;
                 next_addr <= addr + 32'd8;
             end
-        end else if (left != 3'd0) begin
+        end else if (left != 4'd0) begin
             rdata     <= sgi_dpi_read(space, next_addr);
             ack       <= 1'b1;
-            last      <= (left == 3'd1);
-            left      <= left - 3'd1;
+            last      <= (left == 4'd1);
+            left      <= left - 4'd1;
             next_addr <= next_addr + 32'd8;
         end
     end

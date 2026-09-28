@@ -32,9 +32,14 @@ Verdicts, first word of the line:
   UNKNOWN    none of the above
 
     python3 irixstate.py            one line
+    python3 irixstate.py --panicstr 0x881bd184   another kernel's panicstr;
+                                    0 skips it (a relinked kernel - after
+                                    autoconfig - moves every symbol, and a
+                                    stale address can read as a panic)
 """
 import importlib.util
 import struct
+import sys
 from collections import Counter
 
 spec = importlib.util.spec_from_file_location("p", "/media/fat/sgidbg/ddr3_peek.py")
@@ -77,7 +82,10 @@ def fb_sample():
 
 
 def main():
-    ps = struct.unpack(">I", guest_read(PANICSTR, 4))[0]
+    addr = PANICSTR
+    if "--panicstr" in sys.argv:
+        addr = int(sys.argv[sys.argv.index("--panicstr") + 1], 0)
+    ps = struct.unpack(">I", guest_read(addr, 4))[0] if addr else 0
     c = fb_sample(); t = float(sum(c.values()))
     pct = lambda i: 100.0 * c.get(i, 0) / t
     panel, x16, mark, n = pct(9), pct(16), pct(0xE7), len(c)

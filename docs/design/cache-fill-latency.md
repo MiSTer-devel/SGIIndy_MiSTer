@@ -320,3 +320,52 @@ Two readings of the counters:
   read twice per access) are the next flip-flop storage.
 * **The board slowed down** between 18:00 and 23:30 with the same bitstream
   (§4); worth finding what shares the DDR3 controller now.
+
+## 8. Prefetch buffers and the dirty miss (builds 46-48)
+
+**Instruction prefetch (build 46).** An instruction line fill that misses
+`ram_arb`'s buffer fetches its line and the next two in one 12-word DDR3
+burst; the two extra lines are kept and answer later fills in 4 beats. Every
+port write (CPU or DMA) invalidates a buffered line it touches. Hidden switch
+`ipf=off` (`status[21]`). Bench: `tb_ipf`.
+
+**Data prefetch (build 47).** A second two-line buffer for data fills, but a
+data fill bursts only on a stream - when its line follows the previous data
+fill's - so a lone miss never pays for a prefetch. Hidden switch `dpf=off`
+(`status[22]`). Beacon words 47/48 count both buffers' hits.
+
+**The fill ahead of the dirty victim (build 48).** A data miss that evicts a
+dirty line used to read the victim out, queue it in the write FIFO, and only
+then request the fill - behind the line, so the fill's read reached DDR3 after
+the line's four writes were acknowledged. Now `cpu_datacache` raises the fill
+as soon as the victim's beats are out of its RAM (WRITEBACKDONE no longer
+waits for `fifo_block`), and `cpu.vhd`'s scheduler issues a latched refill
+before the staged line. Uncached accesses and instruction fills still wait for
+the line (`datacache_wb_busy`); the fill is never for the victim's line.
+Ordering test: `tests/wborder`.
+
+**On the board** (the same pristine image, same night controls):
+
+| | result |
+|---|---|
+| instruction buffer, `ipf` on vs off (build 46) | X login 79 vs 90 s, fork 1.14x, perl 1.19x, Console scroll 1.18x; answers 43-48 % of instruction fills |
+| data buffer, `dpf` on vs off (build 47) | 1-2 % (fork, scroll), perl/bzip2 flat; answers ~10 % of data fills (a boot-trace replay had predicted 57 %) |
+| fill ahead of the victim, build 48 vs 47 | fork 1.04x, scroll 1.04x, xterm 1-2 %, bzip2 flat |
+
+cpu-tests `bench/ld_miss*` (tests/hw-cputest/bench.patch), Count ticks per load
+(one tick = two clocks):
+
+| walk | build 47, dpf off | build 47 | build 48 |
+|---|---:|---:|---:|
+| `ld_miss`, a 32-byte stream | 12 | 9 | 9 |
+| `ld_miss64`, never a stream | 12.2 | 12.2 | 12.2 |
+| `ld_miss_dirty64`, every miss evicts a dirty line | 21.7 | 21.7 | 17.5 |
+
+So a dirty victim cost 19 clocks and now costs 10.6; about half of IRIX's
+data fills evict one. The perl loop swings run to run with where the
+interpreter lands in the instruction cache (7.5 to 18 instruction fills per
+1000 instructions), not with these changes.
+
+**Next.** A posted line write in `ram_arb` (acknowledged when latched, the
+next read allowed past it with an address check) would hide the rest of a
+dirty miss; early restart would take ~5 clocks off every fill.

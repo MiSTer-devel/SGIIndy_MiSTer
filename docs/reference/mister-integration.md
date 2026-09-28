@@ -7,13 +7,19 @@ the SCSI images, the keyboard, the mouse and the clock, the SCC on the board's
 UART, and VC2's raster to the scaler. This is how each of those is wired, and
 why.
 
-The current release is `releases/SGIIndy_20260918.rbf` (build 44, dated
-260918) with `releases/boot.rom`. It was built with Quartus Prime Lite 17.0.2
-at fitter seed 1, the seed `sgiindy.qsf` keeps: 35,554 of 41,910 ALMs (85 %),
-485 of 553 M10K blocks, 59 of 112 DSP blocks, and timing met in every check —
-worst setup slack +0.273 ns on the 50 MHz core clock and +0.032 ns on the HDMI
-pixel clock. `SEED=1 BUILD_DATE=260918 bash scripts/build.sh` rebuilds it bit
-for bit. `scripts/build.sh` writes that report into `reports/` after every
+The current release is `releases/SGIIndy_20260927.rbf` (build 48, dated
+260927) with `releases/boot.rom`: audio, the CD-read fix, and the instruction
+and data prefetch and dirty-miss reordering of
+[cache-fill-latency.md](../design/cache-fill-latency.md) sections 8-10. It was
+built with Quartus Prime Lite 17.0.2 **on the Linux build machine (m900)** at
+fitter seed 5, the seed `sgiindy.qsf` keeps: 37,228 of 41,910 ALMs (89 %), 487
+of 553 M10K blocks, 63 of 112 DSP blocks, and timing met in every check - worst
+setup slack +0.080 ns on the 50 MHz core clock and +0.061 ns on the HDMI pixel
+clock. `SEED=5 BUILD_DATE=260927 bash scripts/build.sh` on that machine
+rebuilds it; Quartus on Windows places the same inputs differently, so a
+bitstream is only bit-identical on the machine that built it. The previous
+release, `SGIIndy_20260918.rbf` (build 44, seed 1, built on Windows), stays in
+`releases/` beside it. `scripts/build.sh` writes that report into `reports/` after every
 compile; [deploy-and-debug.md](deploy-and-debug.md#building) has the flow.
 
 ## The map
@@ -517,7 +523,7 @@ The comment above the writer in `sgiindy.sv` is the authoritative bit map.
 ## Installing a release
 
 ```
-/media/fat/_Computer/SGIIndy_20260918.rbf   the core, in any "_" folder
+/media/fat/_Computer/SGIIndy_20260927.rbf   the core, in any "_" folder
 /media/fat/games/SGIIndy/boot.rom           the PROM: releases/boot.rom
 ```
 
