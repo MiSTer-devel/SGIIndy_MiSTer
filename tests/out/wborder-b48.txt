@@ -1,0 +1,93 @@
+ELF: /home/dani/sgimd/tests/wborder/build/wborder.elf  entry 88200000
+  seg0  vaddr 88200000  phys 08200000  file    3368  mem   19776
+boot PC 88200000, RAM 64 MB, testdev yes, I$ on, D$ on
+WBORDER: dirty victims against the fills that evict them
+  ok   T1 re-miss on the victim
+  ok   T2 uncached read of the victim
+  ok   T3 a stream of dirty misses
+  ok   T4 code written through the data cache
+  ok   T1 re-miss on the victim
+  ok   T2 uncached read of the victim
+  ok   T3 a stream of dirty misses
+  ok   T4 code written through the data cache
+  ok   T1 re-miss on the victim
+  ok   T2 uncached read of the victim
+  ok   T3 a stream of dirty misses
+  ok   T4 code written through the data cache
+  T3's cached walks: 0000fc45 Count ticks
+WBORDER: ALL PASS 00000000
+
+--- testdev-exit after 10784582 cycles, 260201 bus transactions ---
+perf: 7162560 instructions, clocks: run 7187136, fetch held 26880, execute held 3112192, writeback held 924160, TLB walk 0 (counters are x64)
+perf: I-cache fills 1768 (0.25 per 1000 instructions), D-cache fills 16303 (2.28), writeback beats 33288, uncached fetches 2052
+perf: TLB walks instruction 0 (0.00 per 1000), data 0 (0.00); bus transactions 205988; clocks on the bus for I-fills 12352, D-fills 114112
+perf: I-cache refills after an instruction TLB walk 0, fill requests answered from the cache 0
+perf: instruction fills answered from the prefetch buffer 109, fills that fetched the next two lines 1659
+perf: data fills answered from the data buffer 4434, stream fills that fetched the next two lines 2233
+last 64 PCs decoded (oldest first), 10782516 total:
+  [  10784519] 88200b5c
+  [  10784520] 88200b60
+  [  10784521] 88200b58
+  [  10784522] 88200b5c
+  [  10784523] 88200b60
+  [  10784524] 88200b58
+  [  10784525] 88200b5c
+  [  10784526] 88200b60
+  [  10784527] 88200b58
+  [  10784528] 88200b5c
+  [  10784529] 88200b60
+  [  10784530] 88200b58
+  [  10784531] 88200b5c
+  [  10784532] 88200b60
+  [  10784533] 88200b58
+  [  10784534] 88200b5c
+  [  10784535] 88200b60
+  [  10784536] 88200b58
+  [  10784537] 88200b5c
+  [  10784538] 88200b60
+  [  10784539] 88200b58
+  [  10784540] 88200b5c
+  [  10784541] 88200b60
+  [  10784542] 88200b58
+  [  10784543] 88200b5c
+  [  10784544] 88200b60
+  [  10784545] 88200b64
+  [  10784546] 88200b68
+  [  10784547] 88200b6c
+  [  10784548] 88200b70
+  [  10784549] 88200b70
+  [  10784550] 88200b70
+  [  10784551] 88200b70
+  [  10784552] 88200b70
+  [  10784553] 88200b70
+  [  10784554] 88200b70
+  [  10784555] 88200b70
+  [  10784556] 88200b74
+  [  10784557] 88200b78
+  [  10784558] 88200b78
+  [  10784559] 88200b78
+  [  10784560] 88200b78
+  [  10784561] 88200b78
+  [  10784562] 88200b78
+  [  10784563] 88200b78
+  [  10784564] 88200b78
+  [  10784565] 88200b78
+  [  10784566] 88200b78
+  [  10784567] 88200b78
+  [  10784568] 88200b78
+  [  10784569] 88200b78
+  [  10784570] 88200b78
+  [  10784571] 88200b78
+  [  10784572] 88200b84
+  [  10784573] 88200b88
+  [  10784574] 88200b88
+  [  10784575] 88200b8c
+  [  10784576] 88200b90
+  [  10784577] 88200b94
+  [  10784578] 88200b98
+  [  10784579] 88200b7c
+  [  10784580] 88200b80
+  [  10784581] 88200b7c
+  [  10784582] 88200b80
+
+WBORDER: PASS

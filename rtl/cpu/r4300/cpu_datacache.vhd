@@ -630,19 +630,31 @@ begin
 
                when WRITEBACKDONE =>
                   tag_read_addr(4 downto 0) <= tag_addr_low;
-                  if (fifo_block = '0') then
-                     fillNext <= '0';
-                     if (fillNext = '1') then
-                        state       <= FILL;
-                        ram_request <= '1';
-                        if (writeMode = '1' and force_wb = '1') then
-                           isWB <= '1';
-                        end if;
-                     else
-                        state             <= IDLE;
-                        CachecommandDone  <= isCommand;
-                        wb_done           <= isWB;
+                  -- SGI (build 48): THE FILL DOES NOT WAIT FOR THE VICTIM.
+                  -- It used to wait for fifo_block, i.e. until the line was
+                  -- in the write FIFO, and then queued behind it: memstate runs
+                  -- one transaction at a time, so the fill's read reached DDR3
+                  -- only after the line's four writes were taken and
+                  -- acknowledged - 19 clocks on the board (cpu-tests
+                  -- bench/ld_miss_dirty64), and half of IRIX's data fills evict
+                  -- a dirty line. The victim's four beats are out of the RAM by
+                  -- now (the last was read in WRITEBACK4WRITE), so the fill
+                  -- cannot overwrite what the line still needs; cpu.vhd takes
+                  -- this request ahead of the staged line, and everything that
+                  -- must not pass the line still waits for it there
+                  -- (docs/design/cache-fill-latency.md section 10,
+                  -- tests/wborder).
+                  if (fillNext = '1') then
+                     fillNext    <= '0';
+                     state       <= FILL;
+                     ram_request <= '1';
+                     if (writeMode = '1' and force_wb = '1') then
+                        isWB <= '1';
                      end if;
+                  elsif (fifo_block = '0') then
+                     state             <= IDLE;
+                     CachecommandDone  <= isCommand;
+                     wb_done           <= isWB;
                   end if;
                   
                when COMMANDPROCESS =>
