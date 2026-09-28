@@ -25,7 +25,7 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CROSS="${CROSS:-mipsel-linux-gnu-}"
-SIM="${SIM:-$ROOT/verilator/obj_dir/Vsim_top}"
+SIM="$ROOT/verilator/obj_dir/Vsim_top"
 ELF="$ROOT/tests/dma/build/dmatest.elf"
 
 if [[ "${1:-}" != "--no-build" ]]; then

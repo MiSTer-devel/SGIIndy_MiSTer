@@ -7,8 +7,8 @@ desktop on the first sound when the DMA engine did not move.
 
 ## What the software needs
 
-Read out of IRIX 5.3's `kdsp_a2.o` (`/usr/cpu/sysgen/IP22boot/`, disassembled
-with `tools/misterdeploy/ecoffdis.py`) and the IP24 PROM:
+Read out of IRIX 5.3's `kdsp_a2.o` (`/usr/cpu/sysgen/IP22boot/`) and the IP24
+PROM, both disassembled:
 
 * **The driver loads only if HAL2's revision (`0x1FBD8020`) has bit 15 clear**
   (`exprobe` in `/var/sysgen/system/audio.sm`).

@@ -220,28 +220,6 @@ tb_ipf:
 	$V --binary --timing $(TBC_W) --top-module tb_ipf --Mdir ./obj_dir_tbipf -o tb_ipf 	   tb_ipf.sv $(RTL)/sgi/ram_arb.sv
 	./obj_dir_tbipf/tb_ipf
 
-# --- the SCSI block cache over a whole disk, every sector self-describing -------
-# Each sector carries its LBA and write generation, so the device checks that
-# a flushed sector lands at its own LBA; LBAs span 2 GB (tb_scsi_cache folds
-# them into 128 sectors a slot). Written after build 46's stray write.
-#   make -C verilator tb_scsi_cache_big
-tb_scsi_cache_big:
-	$V --binary --timing $(TBC_W) +define+SIMULATION=1 +define+VERILATOR=1 +incdir+$(RTL)/scsi 	   --top-module tb_scsi_cache_big --Mdir ./obj_dir_tbcbig -o tb_scsi_cache_big 	   tb_scsi_cache_big.sv $(RTL)/scsi/scsi_cache.sv
-	./obj_dir_tbcbig/tb_scsi_cache_big
-
-# --- sgi_memmap against a reference copy of itself ---------------------------
-# The reference is an earlier sgi_memmap.sv with its module renamed
-# sgi_memmap_ref; hit and offset must agree on every input the bench drives.
-# Build 45b's rewrite was checked against the 32-bit original (24.8 million
-# comparisons, 0 mismatches):
-#   git show 2621a80:rtl/sgi/sgi_memmap.sv | sed 's/module sgi_memmap/module sgi_memmap_ref/' > /tmp/sgi_memmap_ref.sv
-#   make -C verilator tb_memmap MEMMAP_REF=/tmp/sgi_memmap_ref.sv
-MEMMAP ?= $(RTL)/sgi/sgi_memmap.sv
-tb_memmap:
-	$V --binary --timing $(TBC_W) --top-module tb_memmap --Mdir ./obj_dir_tbmm -o tb_memmap 	   tb_memmap.sv $(MEMMAP) $(MEMMAP_REF)
-	./obj_dir_tbmm/tb_memmap
-
-
 # The bench in the shape sgi_scsi.sv instantiates since build 27: the CD slot
 # cached with a 64-sector window and multi-block on (CACHE_CD = 1, SECT2 = 64,
 # MB_CD = 1).

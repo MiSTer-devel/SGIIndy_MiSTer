@@ -176,7 +176,6 @@ machine's PROM and reads the log out of main memory
 
 | Run | Result |
 |---|---|
-| board, release SGIIndy_20260927 (build 48, seed 5), 2026-09-27 | **2415 checks passed, 0 failed**, 255 tests |
 | board, release SGIIndy_20260918 (build 44, seed 1), 2026-09-18 | **2415 checks passed, 0 failed**, 255 tests |
 | simulator, the current CPU RTL (2026-09-17) | **2409 checks passed, 0 failed**, 250 tests |
 

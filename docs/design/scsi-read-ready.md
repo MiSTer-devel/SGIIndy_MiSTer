@@ -23,7 +23,7 @@ so a capture landing in a stolen clock took the next word's byte.
   the old capture; beacon word 46 counts waits and not-ready captures.
 
 **Board A/B** (build 45b), copying the same CD file under IRIX and comparing
-with the ISO (`scripts/cdfile.sh`): the old capture made 2 captures while not
+with the ISO: the old capture made 2 captures while not
 ready and **1 byte wrong at block offset 508**; the guard, 0 and an identical
 file.
 
@@ -52,5 +52,3 @@ IRIX had checksummed. The cause was the checker: IRIX's `efs_writeindir`
 writes an indirect extent block without clearing past its `numextents`
 entries (a real Indy does the same), and `tools/misterdeploy/efsread.py` read
 the stale tail as extents. It now honours `di_numextents`.
-`verilator/tb_scsi_cache_big.sv` (the block cache over a whole disk with
-self-describing sectors) found no fault in the cache either.

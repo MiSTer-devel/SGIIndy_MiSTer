@@ -41,7 +41,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SIM="${SIM:-$ROOT/verilator/obj_dir/Vsim_top}"
+SIM="$ROOT/verilator/obj_dir/Vsim_top"
 PROM="${PROM:-$ROOT/roms/IP24_Indy/ip24prom.070-9101-011.bin}"
 OUT="$ROOT/tests/out/newport-console.txt"
 FB="$ROOT/tests/out/newport-fb.ppm"

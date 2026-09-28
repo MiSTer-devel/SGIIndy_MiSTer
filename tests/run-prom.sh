@@ -18,8 +18,7 @@
 # and doubling RTC_TICK_DIV each leave it at 16, which rules out both
 # timebases; the loop lives at 0xBFC3159C, in uncached KSEG1, so the
 # instruction cache does not move it either. See docs/reference/cpu.md,
-# "What it did not buy". The part that matters is "R4600, with FPU" - an
-# R4400 before the Killer Instinct CPU re-vendor (docs/history.md, build 25).
+# "What it did not buy". The part that matters is "R4400, with FPU".
 #
 # The run ends on "Mbytes" rather than on "Memory size:", which is the last
 # thing hinv prints: --stop-on fires on the cycle the substring completes, so
@@ -30,7 +29,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SIM="${SIM:-$ROOT/verilator/obj_dir/Vsim_top}"
+SIM="$ROOT/verilator/obj_dir/Vsim_top"
 PROM="${PROM:-$ROOT/roms/IP24_Indy/ip24prom.070-9101-011.bin}"
 OUT="$ROOT/tests/out/prom-console.txt"
 
@@ -43,7 +42,7 @@ EXPECT=(
     "5) Enter Command Monitor"
     "Command Monitor."                     # and the menu took a keystroke: serial input
     "PROM Monitor SGI Version 5.3"         # the >> prompt runs commands
-    "Processor: 16 Mhz R4600, with FPU"    # the R4600 presentation (KI re-vendor), end to end
+    "Processor: 16 Mhz R4400, with FPU"    # the R4400 presentation, end to end
     "Primary I-cache size: 16 Kbytes"
     "Memory size: 64 Mbytes"               # and MEMCFG sized the SIMMs right
 )

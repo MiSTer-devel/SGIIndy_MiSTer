@@ -23,7 +23,7 @@ CPUTESTS="${CPUTESTS:-$HOME/repos/iris/cpu-tests}"
 # -EB -mabi=n32 gets exactly the ELF32 MSB n32 image the suite wants:
 #   brew install messense/macos-cross-toolchains/mipsel-unknown-linux-gnu
 CROSS="${CROSS:-mipsel-linux-gnu-}"
-SIM="${SIM:-$ROOT/verilator/obj_dir/Vsim_top}"
+SIM="$ROOT/verilator/obj_dir/Vsim_top"
 OUT="${OUT:-$ROOT/tests/out}"
 REF="${REF:-$ROOT/tests/baseline/iris-r4400.log}"
 

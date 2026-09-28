@@ -473,7 +473,6 @@ in UPSTREAM.md and
 
 | Check | Result |
 |---|---|
-| cpu-tests, R4600 case, on the board: the suite as the PROM, release SGIIndy_20260927 (build 48, seed 5), 2026-09-27 | **2415 checks passed, 0 failed**, 255 tests |
 | cpu-tests, R4600 case, on the board: the suite as the PROM, release SGIIndy_20260918 (build 44, seed 1), 2026-09-18 | **2415 checks passed, 0 failed**, 255 tests |
 | cpu-tests, R4600 case, in the simulator: the current CPU RTL, last run 2026-09-17 | **2409 passed, 0 failed**, 250 tests |
 | `make -C verilator cpuonly`: the CPU and `r4300_bus` alone, against a memory whose answer latency is swept, 2026-09-17 | 728 runs, 0 against expectation |

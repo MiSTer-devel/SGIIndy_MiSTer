@@ -44,7 +44,7 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CROSS="${CROSS:-mipsel-linux-gnu-}"
-SIM="${SIM:-$ROOT/verilator/obj_dir/Vsim_top}"
+SIM="$ROOT/verilator/obj_dir/Vsim_top"
 ELF="$ROOT/tests/scsiwr/build/scsiwr.elf"
 DISK="$ROOT/tests/out/scratch8m.img"
 ISO="$ROOT/tests/out/scsiwr8m.iso"
