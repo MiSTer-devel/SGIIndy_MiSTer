@@ -7,21 +7,24 @@ the SCSI images, the keyboard, the mouse and the clock, the SCC on the board's
 UART, and VC2's raster to the scaler. This is how each of those is wired, and
 why.
 
-The current release is `releases/SGIIndy_20260928.rbf` (build 49c, dated
-260928) with `releases/boot.rom`: IRIX's menus shown again - the popup planes
-come with the drawing planes, and the display gets more DDR3 reads in flight
-while an overlay is up or a line cache runs low
-([popup-planes-display-fetch.md](../design/popup-planes-display-fetch.md)). It
-was built with Quartus Prime Lite 17.0.2 **on the Linux build machine (m900)**
-at fitter seed 5, the seed `sgiindy.qsf` keeps: 37,058 of 41,910 ALMs (88 %),
-491 of 553 M10K blocks, 63 of 112 DSP blocks, and timing met in every check -
-worst setup slack +0.565 ns on the 50 MHz core clock and +0.352 ns on the HDMI
-pixel clock. `SEED=5 BUILD_DATE=260928 bash scripts/build.sh` on that machine
+The current release is `releases/SGIIndy_20260928_2.rbf` (build 50, dated
+260928) with `releases/boot.rom`: IRIX 6.2 and 6.5 install - their n32
+processes run with Status.UX = 1 under a KX = 0 kernel, and a trap on the
+second instruction after an ERET no longer fetches its own exception vector as
+a user address ([irix6-user-mode.md](../design/irix6-user-mode.md)) - on top
+of build 49c's IRIX menus (the popup planes come with the drawing planes, and
+the display gets more DDR3 reads in flight while an overlay is up or a line
+cache runs low; [popup-planes-display-fetch.md](../design/popup-planes-display-fetch.md)).
+It was built with Quartus Prime Lite 17.0.2 **on the Linux build machine
+(m900)** at fitter seed 5, the seed `sgiindy.qsf` keeps: 37,174 of 41,910
+ALMs (89 %), 491 of 553 M10K blocks, 63 of 112 DSP blocks, and timing met in
+every check - worst setup slack +0.654 ns on the 50 MHz core clock and
++0.066 ns on the HDMI pixel clock. `SEED=5 BUILD_DATE=260928 bash scripts/build.sh` on that machine
 rebuilds it; Quartus on Windows places the same inputs differently, so a
 bitstream is only bit-identical on the machine that built it. The earlier
-releases, `SGIIndy_20260927.rbf` (build 48, seed 5, m900) and
-`SGIIndy_20260918.rbf` (build 44, seed 1, built on Windows), stay in
-`releases/` beside it. `scripts/build.sh` writes that report into `reports/` after every
+releases, `SGIIndy_20260928.rbf` (build 49c, seed 5, m900),
+`SGIIndy_20260927.rbf` (build 48, seed 5, m900) and `SGIIndy_20260918.rbf`
+(build 44, seed 1, built on Windows), stay in `releases/` beside it. `scripts/build.sh` writes that report into `reports/` after every
 compile; [deploy-and-debug.md](deploy-and-debug.md#building) has the flow.
 
 ## The map
@@ -525,7 +528,7 @@ The comment above the writer in `sgiindy.sv` is the authoritative bit map.
 ## Installing a release
 
 ```
-/media/fat/_Computer/SGIIndy_20260928.rbf   the core, in any "_" folder
+/media/fat/_Computer/SGIIndy_20260928_2.rbf the core, in any "_" folder
 /media/fat/games/SGIIndy/boot.rom           the PROM: releases/boot.rom
 ```
 
