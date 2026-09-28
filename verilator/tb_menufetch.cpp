@@ -170,7 +170,7 @@ static Result run(const Params &p)
     for (int i = 0; i < 8; i++) tick();
     dut->reset = 0; tick();
 
-    // The rasteriser marks a line it writes a visible OVERLAY value into
+    // The rasteriser marks a line whose OVERLAY bytes it writes
     // (np_rex3's aux_mark); popup writes mark nothing since build 49.
     if (p.kind == 3)
         for (int y = p.y0; y <= p.y1; y++) { dut->mark = 1; dut->mark_line = y; tick(); }
