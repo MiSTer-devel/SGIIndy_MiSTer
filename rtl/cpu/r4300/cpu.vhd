@@ -3777,7 +3777,12 @@ begin
             else region_unused <= '1';
             end if;
          elsif (privilegeMode = "10") then
-            if (value1 <= x"FFFFFFFFFF") then region_TLBmapped <= '1'; end if;
+            -- SGI: the else arm. Upstream left everything above xuseg neither
+            -- mapped nor unused, i.e. an UNMAPPED physical access: a UX = 1
+            -- process (every IRIX 6 n32 one) could read and write kernel
+            -- memory through a KSEG0 pointer instead of faulting.
+            -- cpu-tests: umode/kseg0_load_*.
+            if (value1 <= x"FFFFFFFFFF") then region_TLBmapped <= '1'; else region_unused <= '1'; end if;
          end if;
       else
          -- kusegUnmapped is Status.ERL. See the note in cpu_cop0.vhd: while it is
@@ -3790,7 +3795,11 @@ begin
             if (calcMemAddr(31 downto 29) = 4 or calcMemAddr(31 downto 29) = 5 or calcMemAddr(31 downto 29) = 7) then region_unused <= '1'; end if;
          elsif (privilegeMode = "10") then
             if (calcMemAddr(31 downto 29) < 4 and kusegUnmapped = '0') then region_TLBmapped <= '1'; end if;
-            if (calcMemAddr(31 downto 29) > 3 and calcMemAddr(31 downto 29) < 8) then region_unused <= '1'; end if;
+            -- SGI: was `> 3 and < 8`. The `< 8` compares a 3-bit slice with a
+            -- constant that needs four bits; numeric_std makes that TRUE, but
+            -- GHDL's synthesis truncated the 8 to 3'b000, so the simulated core
+            -- never raised this address error at all. The term says nothing.
+            if (calcMemAddr(31 downto 29) > 3) then region_unused <= '1'; end if;
          end if;
       end if;
    end process;

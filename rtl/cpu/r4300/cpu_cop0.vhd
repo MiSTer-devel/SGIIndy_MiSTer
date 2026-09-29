@@ -320,6 +320,12 @@ architecture arch of cpu_cop0 is
    -- exception, so by the time EPC is written the register no longer says
    -- whether this exception interrupted a handler. See the EPC writes.
    signal excSavedEXL                     : std_logic := '0';
+   -- SGI: whether the access that raised the current exception was made in a
+   -- 64-bit address space - Status.KX, SX or UX of the privilege level it ran
+   -- at - saved in the same cycle as excSavedEXL. It picks the XTLB refill
+   -- vector. See bit64now.
+   signal excBit64                        : std_logic := '0';
+   signal bit64now                        : std_logic;
    signal isDelaySlot_1                   : std_logic := '0';
    -- Written only by the exception process below.
    signal suppressed_1                    : std_logic := '0';
@@ -562,6 +568,19 @@ begin
                     COP0_12_SR_privilegeMode;
    kusegUnmapped <= COP0_12_SR_errorLevel;
    bit64region   <= bit64mode;
+   -- SGI: the current privilege level's KX/SX/UX, read straight from Status.
+   -- bit64mode is a registered copy refreshed only when an instruction reaches
+   -- execute, so it describes the instruction AHEAD of the one being decoded
+   -- and lags every mode switch by an instruction. IRIX 6 switches on every
+   -- exception and every ERET: it runs n32 processes with UX = 1 under a
+   -- kernel with KX = 0 (IRIX 5's o32 processes and the cpu-tests suite never
+   -- switch - all three bits are equal). This is what the exception entry
+   -- samples, when Status still describes the faulting access.
+   bit64now      <= COP0_12_SR_kernelExtendedAddr when (COP0_12_SR_exceptionLevel = '1' or
+                                                        COP0_12_SR_errorLevel     = '1') else
+                    COP0_12_SR_supervisorAddr     when (COP0_12_SR_privilegeMode = "01") else
+                    COP0_12_SR_userExtendedAddr   when (COP0_12_SR_privilegeMode(1) = '1') else  -- "10", and "11" as above
+                    COP0_12_SR_kernelExtendedAddr;
    
    TagLo_Valid   <= COP0_28_TAGLO_primaryCacheState(1);
    TagLo_Dirty   <= COP0_28_TAGLO_primaryCacheState(0);
@@ -772,7 +791,7 @@ begin
          if (COP0_12_SR_vectorLocation = '1') then
          
             if (tlbRefillVector) then
-               if (bit64mode = '1') then
+               if (excBit64 = '1') then
                   exceptionPC(31 downto 0) <= x"BFC00280";
                else
                   exceptionPC(31 downto 0) <= x"BFC00200";
@@ -784,7 +803,7 @@ begin
          else
             
             if (tlbRefillVector) then
-               if (bit64mode = '1') then
+               if (excBit64 = '1') then  -- SGI: the faulting access's mode, not bit64mode
                   exceptionPC(31 downto 0) <= x"80000080";
                else
                   exceptionPC(31 downto 0) <= x"80000000";
@@ -794,11 +813,21 @@ begin
             end if;
             
          end if;
-         if (bit64mode = '1') then
-            exceptionPC(63 downto 32) <= (others => '1');
-         else
-            exceptionPC(63 downto 32) <= (others => '0');
-         end if;
+         -- SGI: ALWAYS SIGN-EXTENDED. Every vector is in ckseg0/ckseg1, which
+         -- a 32-bit kernel reaches through the low word alone and a 64-bit one
+         -- only as 0xFFFFFFFF_8xxxxxxx. Upstream zero-extended it when
+         -- bit64mode was clear, and bit64mode is stale across a mode switch
+         -- (see bit64now): when an instruction that follows the first one
+         -- after an ERET into a UX = 1 process traps, this block still sees the
+         -- kernel's KX = 0 and builds 0x00000000_80000180, while the fetch one
+         -- clock later sees the process's UX = 1 and takes that for an xuseg
+         -- address - TLB-mapped, and missing. The nested miss (EXL is set, so
+         -- EPC is frozen) is reported as a TLBL at 0x80000180 on the user
+         -- instruction. That is IRIX 6.5's "init died (why = 3, what = 0xb)":
+         -- libc's getuid is `li v0,1024 ; syscall`, entered straight from an
+         -- ERET (an instruction-TLB refill or an interrupt returning to the
+         -- li). cpu-tests: umode/syscall_second.
+         exceptionPC(63 downto 32) <= (others => '1');
          
          --if (COP0_12_SR_interruptEnable = '1' or COP0_12_SR_exceptionLevel = '1') then    
          --   irq_offCount <= (others => '0');
@@ -1230,6 +1259,7 @@ begin
                exceptionStage1            <= '1';
                tlbMiss1                   <= TLB_ExcInstrMiss;
                excSavedEXL                <= COP0_12_SR_exceptionLevel;  -- SGI
+               excBit64                   <= bit64now;                   -- SGI
                COP0_12_SR_exceptionLevel  <= '1';
                -- SGI: EVERY fetch-side exception starts out provisional, and
                -- the trace is why it cannot be conditioned on the data side
@@ -1267,6 +1297,7 @@ begin
                      exception <= '1';
                      dbg_exc   <= '1';   -- SGI
                      excSavedEXL                 <= COP0_12_SR_exceptionLevel;  -- SGI
+                     excBit64                    <= bit64now;                   -- SGI
                      COP0_12_SR_exceptionLevel   <= '1';
                      COP0_13_CAUSE_coprocessorError <= "00";
                      if (decode_irq = '1') then

@@ -118,8 +118,8 @@ module np_rex3 #(
     output logic  [7:0] fb_be,
     input  logic [63:0] fb_rdata,
     input  logic        fb_ack,
-    // A visible value (overlay or popup bits) was just written into the
-    // auxiliary planes of frame buffer line `aux_mark_line`. The display
+    // The overlay bytes of the auxiliary planes of frame buffer line
+    // `aux_mark_line` were just written. The display
     // side's flag table (rtl/mister/fb_linecache.sv, TRACK_ZERO) needs it.
     output logic        aux_mark,
     output logic [10:0] aux_mark_line,
@@ -1432,14 +1432,20 @@ module np_rex3 #(
     wire [7:0] fb_be_masked = dst_x[0] ? {slot_be, 4'b0000} : {4'b0000, slot_be};
 
     // An auxiliary write that touches byte 0 changes aux[3:0], so the copy in
-    // the drawing slot has to follow (DR_CID). And one that puts anything the
-    // display can see - overlay or popup bits - into a line tells the display
-    // side's flag table about it (fb_linecache's TRACK_ZERO).
+    // the drawing slot has to follow (DR_CID) - and the display reads the
+    // popup bits from that copy (newport.sv). One that writes the overlay
+    // bytes tells the display side's flag table about its line (fb_linecache's
+    // TRACK_ZERO); popup and window-ID writes (masks 0xCC, 0x33) do not,
+    // because the display no longer fetches the auxiliary planes for them.
+    //
+    // BY THE WRITE MASK, NOT BY THE VALUE. A flag means "may hold something"
+    // and the cache drops it after one fetch that finds zeros, so marking a
+    // line for an overlay write of zero costs one fetch and nothing else.
+    // Testing the value put the end of the pixel pipeline in front of
+    // aux_mark, and that was the one path build 49b missed the core clock on
+    // (-0.150 ns); the mask is a register.
     wire cid_copy_need = is_aux_plane && slot_be[0];
-    wire aux_visible   = is_aux_plane
-                       && ((slot_be[2] && (plane_val[23:16] != 8'h0))
-                        || (slot_be[1] && (plane_val[15:8]  != 8'h0))
-                        || (slot_be[0] && (plane_val[3:2]   != 2'b0)));
+    wire aux_visible   = is_aux_plane && (|wrmask[23:8]);
 
     // A READ's pixel on its way into the host word: the plane value in
     // colour-index mode, and the 24-bit colour quantised to the host's own

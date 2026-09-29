@@ -136,8 +136,9 @@ project's fitter seed is the one the released bitstream met timing with. The
 core's version in the MiSTer menu is the build date, and the date is part of
 the logic, so a build made on another day is a new fit that has to meet
 timing on its own: check `reports/summary.md`.
-`SEED=1 BUILD_DATE=260918 bash scripts/build.sh` rebuilds the released
-bitstream bit for bit.
+`SEED=5 BUILD_DATE=260928 bash scripts/build.sh` on the Linux build machine
+that made it rebuilds the released bitstream bit for bit (Quartus on Windows
+places the same inputs differently).
 
 **The build report.** `scripts/build.sh` finishes by writing
 [`reports/`](reports/summary.md): device use, the timing slack of every clock in

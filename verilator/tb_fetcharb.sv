@@ -35,6 +35,7 @@ module tb_fetcharb (
     input  logic        fbr_dout_valid
 );
     logic        lr_req, lr_taken, lr_valid, la_req, la_taken, la_valid;
+    logic        lr_urgent, la_urgent;
     logic [31:0] lr_addr, la_addr;
     logic  [7:0] lr_burst, la_burst;
     logic [63:0] lr_dout, la_dout;
@@ -45,7 +46,7 @@ module tb_fetcharb (
         .vs(vs), .mark(1'b0), .mark_line(11'd0),
         .fbr_req(lr_req), .fbr_addr(lr_addr), .fbr_burst(lr_burst),
         .fbr_taken(lr_taken), .fbr_dout(lr_dout), .fbr_dout_valid(lr_valid),
-        .miss(rgb_miss), .dbg_skips(), .dbg_miss_mark(1'b0));
+        .miss(rgb_miss), .fetching(), .urgent(lr_urgent), .dbg_skips(), .dbg_miss_mark(1'b0));
 
     fb_linecache #(.TRACK_ZERO(1'b1), .REGION_BASE(32'h0080_0000)) u_aux (
         .clk(clk), .reset(reset),
@@ -53,13 +54,13 @@ module tb_fetcharb (
         .vs(vs), .mark(mark), .mark_line(mark_line),
         .fbr_req(la_req), .fbr_addr(la_addr), .fbr_burst(la_burst),
         .fbr_taken(la_taken), .fbr_dout(la_dout), .fbr_dout_valid(la_valid),
-        .miss(aux_miss), .dbg_skips(aux_skips), .dbg_miss_mark(1'b0));
+        .miss(aux_miss), .fetching(), .urgent(la_urgent), .dbg_skips(aux_skips), .dbg_miss_mark(1'b0));
 
     fb_fetch_arb u_arb (
         .clk(clk), .reset(reset),
-        .a_req(lr_req), .a_addr(lr_addr), .a_burst(lr_burst),
+        .a_req(lr_req), .a_urgent(lr_urgent), .a_addr(lr_addr), .a_burst(lr_burst),
         .a_taken(lr_taken), .a_dout(lr_dout), .a_dout_valid(lr_valid),
-        .b_req(la_req), .b_addr(la_addr), .b_burst(la_burst),
+        .b_req(la_req), .b_urgent(la_urgent), .b_addr(la_addr), .b_burst(la_burst),
         .b_taken(la_taken), .b_dout(la_dout), .b_dout_valid(la_valid),
         .fbr_req(fbr_req), .fbr_addr(fbr_addr), .fbr_burst(fbr_burst),
         .fbr_taken(fbr_taken), .fbr_dout(fbr_dout), .fbr_dout_valid(fbr_dout_valid));

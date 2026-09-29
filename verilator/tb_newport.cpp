@@ -26,6 +26,8 @@
 //    9  display column alignment: VC2, XMAP9 and CMAP programmed over the
 //       DCB as the PROM does, markers in the frame buffer, the pins watched:
 //       pixel N of the 1280-pixel window is column 8 + N
+//   10  the popup and overlay planes drawn through REX3 as X draws a menu,
+//       the pins watched: popup over overlay over the pixel, own colours
 //
 //  Every test starts from a reset and a cleared frame buffer, and a draw
 //  check is a whole-frame-buffer difference against a snapshot taken just
@@ -958,6 +960,133 @@ static void t9_display()
                 "is frame buffer column 8 + N, the first one included", ok, nullptr, d);
 }
 
+// The popup and overlay planes on the pins, drawn the way X draws a menu:
+// REX3 into planes 5 (PUP, write mask 0xCC) and 4 (OLAY, 0xFFFF00). The
+// popup's two bits reach the compositor with the drawing planes, out of the
+// window-ID copy in byte 3 of the drawing slot (newport.sv), so this is also
+// the check that the copy and the display agree on where the bits are.
+static void t10_aux_display()
+{
+    heading("10. popup and overlay planes on the pins: priority cursor > popup > overlay > pixel");
+    fresh();
+    auto colour = [](int i) -> uint32_t {
+        return ((uint32_t)i << 16) | ((uint32_t)((i * 37 + 11) & 0xFF) << 8) | (uint32_t)(0x80 ^ i);
+    };
+    auto pupc = [](int p) -> uint32_t { return 0x01FEC0u + (uint32_t)p; };
+    auto ovlc = [](int o) -> uint32_t { return 0xFD0000u | ((uint32_t)o << 8) | 0x3Cu; };
+    const int PUP_PAGE = 0x40, OVL_PAGE = 3;
+    std::vector<uint32_t> pal(256);
+    for (int i = 0; i < 256; i++) pal[i] = colour(i);
+    cmap_load(0, pal);
+    cmap_load(PUP_PAGE << 5, {0, pupc(1), pupc(2), pupc(3)});
+    for (int i = 0; i < 256; i++) pal[i] = ovlc(i);
+    cmap_load(OVL_PAGE << 8, pal);
+    W(R_DCBMODE, dcbmode(4, 4, 1));                  // XMAP9 popup colour map page
+    W(R_DCBDATA0, (uint32_t)PUP_PAGE << 24);
+    // DID 0: 8-bit colour index, CMAP page 0; auxiliary mode 2 (overlay on),
+    // the overlay's colour map page 3.
+    xmap_mode(0, 0x000400 | (2u << 16) | ((uint32_t)OVL_PAGE << 19));
+
+    // Rows 1-9 tagged 0xA0 + r at columns 480-519 (as test 9), a ramp elsewhere.
+    for (int r = 1; r < 10; r++)
+        for (int x = 0; x < 1400; x++)
+            H->set_slot(x, r, false, (x >= 480 && x < 520) ? 0xA0u + r : (uint32_t)((x * 3 + r) & 0xFF));
+
+    auto rect = [](uint32_t planes, uint32_t mask, uint32_t val, int x0, int y0, int x1, int y1) {
+        W(R_WRMASK, mask);
+        W(R_COLORI, val);
+        W(R_DRAWMODE1, DM1_LO_SRC | DM1_COMPARE_OFF | DM1_DEPTH8 | planes);
+        W(R_DRAWMODE0, DM0_DRAW | DM0_BLOCK | DM0_DOSETUP | DM0_STOPONX | DM0_STOPONY);
+        W(R_XYSTARTI, XY(x0, y0));
+        W(R_XYENDI | GO, XY(x1, y1));
+        settle();
+    };
+    // Odd edges, so the two pixels of a 64-bit word differ at every edge -
+    // with even ones a display that took the wrong half would still pass.
+    rect(5, 0x0000CC, 2,    601, 2, 699, 4);          // a popup menu body
+    rect(5, 0x0000CC, 3,    610, 3, 620, 3);          // a highlighted item in it
+    rect(4, 0xFFFF00, 0x5A, 301, 6, 400, 8);          // an overlay rectangle
+    rect(5, 0x0000CC, 1,    351, 7, 359, 7);          // a popup over the overlay
+    W(R_WRMASK, 0x00FFFFFF);
+    W(R_DRAWMODE1, CI8);
+
+    // What each pixel should be, from the planes as REX3 left them.
+    auto want_at = [&](int x, int y) -> uint32_t {
+        uint32_t aux = H->slot(x, y, true);
+        int pup = (int)((aux >> 2) & 3), ovl = (int)((aux >> 8) & 0xFF);
+        if (pup) return pupc(pup);
+        if (ovl) return ovlc(ovl);
+        return colour((int)(H->slot(x, y, false) & 0xFF));
+    };
+    int pup_px = 0, ovl_px = 0;
+    for (int y = 1; y < 10; y++)
+        for (int x = 0; x < 1400; x++) {
+            uint32_t aux = H->slot(x, y, true);
+            if ((aux >> 2) & 3) pup_px++;
+            if ((aux >> 8) & 0xFF) ovl_px++;
+        }
+
+    vc2_load_1280x1024();
+    settle();
+
+    const int FIRST = 8, WIDTH = 1280;
+    std::map<int, std::vector<uint32_t>> rows;
+    std::vector<uint32_t> cur;
+    bool in = false;
+    const uint64_t limit = H->cyc + 2ull * 1680 * 1065 + 100000;
+    while (!g_hung && H->cyc < limit && rows.size() < 9) {
+        H->tick();
+        if (!H->dut->ce_pix) continue;
+        if (H->dut->de) {
+            if (!in) { cur.clear(); in = true; }
+            cur.push_back(((uint32_t)H->dut->vid_r << 16) | ((uint32_t)H->dut->vid_g << 8)
+                          | (uint32_t)H->dut->vid_b);
+        } else if (in) {
+            in = false;
+            size_t probe = 500 - FIRST;
+            if (cur.size() > probe) {
+                uint32_t t = cur[probe];
+                for (int r = 1; r < 10; r++)
+                    if (t == colour(0xA0 + r) && !rows.count(r)) rows[r] = cur;
+            }
+        }
+    }
+
+    std::vector<std::string> d;
+    bool ok = !g_hung && rows.size() == 9 && pup_px == 99 * 3 + 9 && ovl_px == 100 * 3;
+    d.push_back(strf("REX3 set popup bits on %d pixels (306 expected) and overlay on %d (300 expected); "
+                     "rows found on the pins: %zu of 9", pup_px, ovl_px, rows.size()));
+    int shown_pup = 0, shown_ovl = 0;
+    for (auto &kv : rows) {
+        const int r = kv.first;
+        const auto &px = kv.second;
+        int bad = 0;
+        std::string first;
+        for (int n = 0; n < (int)px.size() && n < WIDTH; n++) {
+            int x = FIRST + n;
+            uint32_t want = want_at(x, r);
+            if (px[n] == want) {
+                if (want == pupc(1) || want == pupc(2) || want == pupc(3)) shown_pup++;
+                else if ((want & 0xFF00FF) == 0xFD003C) shown_ovl++;
+                continue;
+            }
+            if (++bad == 1)
+                first = strf("column %d shows %06x, expected %06x (aux slot %08x, drawing slot %08x)",
+                             x, px[n], want, H->slot(x, r, true), H->slot(x, r, false));
+        }
+        if ((int)px.size() != WIDTH || bad) {
+            ok = false;
+            d.push_back(strf("row %d: %zu pixels, %d wrong; first: %s", r, px.size(), bad,
+                             first.c_str()));
+        }
+    }
+    d.push_back(strf("popup pixels shown in their colours: %d (306 expected); overlay: %d (291 expected)",
+                     shown_pup, shown_ovl));
+    ok = ok && shown_pup == 306 && shown_ovl == 291;
+    report("10", "a popup menu, an item highlighted in it and an overlay under a popup all "
+                 "reach the pins in their own colours, and nothing else changes", ok, nullptr, d);
+}
+
 //============================================================================
 int main(int argc, char **argv)
 {
@@ -986,7 +1115,7 @@ int main(int argc, char **argv)
     struct { int n; void (*fn)(); } tests[] = {
         {1, t1_registers}, {2, t2_xy64}, {3, t3_color64}, {4, t4_host64},
         {5, t5_reads}, {6, t6_vdma}, {7, t7_glcoords}, {8, t8_setup},
-        {9, t9_display},
+        {9, t9_display}, {10, t10_aux_display},
     };
     for (auto &t : tests)
         if (only.empty() || only.count(t.n)) t.fn();

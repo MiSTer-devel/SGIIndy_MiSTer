@@ -412,6 +412,17 @@ ramarbtest:
 	   --x-assign fast --x-initial fast --noassert \
 	   -o Vram_arb $(RTL)/sgi/ram_arb.sv tb_ramarb.cpp
 
+# The prefetch buffers (builds 46, 47) against the same slow memory: every
+# word a line fill is given checked against memory, under random stores, line
+# writes and DMA writes into the lines they hold (tb_ramarb_pf.cpp's header).
+#   make ramarbpftest && LAT=20 SEED=3 ./obj_dir_ramarbpf/Vram_arb
+ramarbpftest:
+	$V -cc --exe --build --build-jobs 0 --verilate-jobs 1 --Mdir ./obj_dir_ramarbpf --top-module ram_arb \
+	   -O3 -CFLAGS "-O2 -std=c++17 -I.." $(CPUTEST_W) \
+	   --x-assign fast --x-initial fast --noassert \
+	   -o Vram_arb $(RTL)/sgi/ram_arb.sv tb_ramarb_pf.cpp
+	./obj_dir_ramarbpf/Vram_arb
+
 # -Wno-LATCH: the round-robin pick declares its candidate inside the for loop
 # of an always_comb, which Verilator 5.020 reads as a latch; WM_W carries the
 # same waiver for the whole machine.
@@ -449,6 +460,20 @@ fetcharbtest:
 	   --x-assign fast --x-initial fast --noassert \
 	   -o Vtb_fetcharb tb_fetcharb.sv $(RTL)/mister/fb_linecache.sv \
 	   $(RTL)/mister/fb_fetch_arb.sv tb_fetcharb.cpp
+
+# --- ...and through the real ddr3_mux, with a menu or an overlay posted -----
+# The two caches, the arbiter and ddr3_mux against a bridge with a ~10-clock
+# read latency: build 48's invisible menus (tb_menufetch.cpp's header). The
+# split is the shipping one unless MENUFETCH_G overrides it, e.g.
+#   make menufetchtest MENUFETCH_G="-GFBR_SUB=4 -GFBR_AHEAD=4"
+#   CASE=3 LAT=12 ./obj_dir_menufetch/Vtb_menufetch    # one picture, knobs
+menufetchtest:
+	$V -cc --exe --build --build-jobs 0 --verilate-jobs 1 --Mdir ./obj_dir_menufetch --top-module tb_menufetch \
+	   $(MENUFETCH_G) -O3 -CFLAGS "-O2 -std=c++17 -I.." $(CPUTEST_W) -Wno-LATCH \
+	   --x-assign fast --x-initial fast --noassert \
+	   -o Vtb_menufetch tb_menufetch.sv $(RTL)/mister/fb_linecache.sv \
+	   $(RTL)/mister/fb_fetch_arb.sv $(RTL)/mister/ddr3_mux.sv tb_menufetch.cpp
+	./obj_dir_menufetch/Vtb_menufetch
 
 linecachetest:
 	$V -cc --exe --build -j 0 --Mdir ./obj_dir_lcache --top-module fb_linecache \

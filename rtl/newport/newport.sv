@@ -453,6 +453,7 @@ module newport #(
     logic [63:0] pix_word;
     logic        pix_valid;
     logic [23:0] slot_rgb, slot_aux;
+    logic  [1:0] slot_pup;
     logic        req_x0;
 
     wire [31:0] slot_off = (((({21'b0, vc2_y}) << FB_STRIDE_LOG2) + {21'b0, vc2_x}) << 2);
@@ -465,12 +466,14 @@ module newport #(
         if (reset) begin
             slot_rgb  <= 24'h0;
             slot_aux  <= 24'h0;
+            slot_pup  <= 2'b0;
             pix_valid <= 1'b0;
             req_x0    <= 1'b0;
         end else begin
             if (vc2_ce) req_x0 <= vc2_x[0];
             if (fbr_ack) begin
                 slot_rgb  <= req_x0 ? fbr_rdata[55:32] : fbr_rdata[23:0];
+                slot_pup  <= req_x0 ? fbr_rdata[59:58] : fbr_rdata[27:26];
                 pix_valid <= 1'b1;
             end
             if (fba_ack)
@@ -519,7 +522,18 @@ module newport #(
 
     // The auxiliary planes' contribution: the popup's two bits, and the
     // overlay byte from whichever of its two buffers the mode selects.
-    wire  [1:0] pup      = fb_aux[3:2];
+    //
+    // THE POPUP COMES WITH THE DRAWING PLANES, as it does out of a real
+    // Newport's VRAM, where every plane of a pixel leaves in the same serial
+    // transfer. np_rex3 keeps aux[3:0] - popup buffer A and window ID A -
+    // copied into byte 3 of the drawing slot for its CID clip, so the popup
+    // bits arrive with every drawing-plane word and a posted menu costs no
+    // auxiliary fetch at all. Read from the auxiliary planes, as until build
+    // 48, a menu doubled the display's memory demand on every line it covered;
+    // the auxiliary line cache fell behind at the menu's first line and served
+    // the rest as zeros, which in the popup planes is transparent - the
+    // Toolchest's menus showed one row. Only the overlay still needs `fba`.
+    wire  [1:0] pup      = slot_pup;
     wire  [7:0] overlay  = m_ovl_bsel ? fb_aux[23:16] : fb_aux[15:8];
     wire        ovl_on   = (m_aux_mode == 3'd2 || m_aux_mode == 3'd6
                             || m_aux_mode == 3'd7) && (overlay != 8'h0);
