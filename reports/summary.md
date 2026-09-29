@@ -6,7 +6,7 @@ tables; the full reports stay in `output_files/`.
 
 | | |
 |---|---|
-| bitstream | `SGIIndy_20260928_2.rbf`, 4487984 bytes, md5 `95644161bee37082891c34cdb92c601c` |
+| bitstream | `SGIIndy_20260928.rbf`, 4487984 bytes, md5 `95644161bee37082891c34cdb92c601c` |
 | built | 2026-09-28 18:38 |
 | fitter seed | 5 |
 | Quartus | 17.0.2 Build 602 07/19/2017 SJ Lite Edition |

@@ -71,7 +71,7 @@ XContext, EntryHi). IRIS main passes 17/17 tests (352 checks).
 | IRIX 6.2 install, board | hung after the root mount | miniroot up, csh + mkfs, `Inst Main Menu` |
 | IRIX 5.3 boot, board (fresh pristine copy) | X, login, menus | the same; `init 0` clean |
 
-Released as `releases/SGIIndy_20260928_2.rbf` (build 50: m900, seed 5,
+Released as `releases/SGIIndy_20260928.rbf` (build 50: m900, seed 5,
 BUILD_DATE 260928, md5 `95644161bee37082891c34cdb92c601c`), with build 49c's
 menu fix underneath.
 

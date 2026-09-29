@@ -79,9 +79,11 @@ for drag shell"; GL overlays), so:
 | drawing slot byte 3 vs `aux[3:0]` | | equal at every captured pixel (49b) |
 
 Build 49 (`6c073e7`) missed the core clock by 0.726 ns and 49b (`a4204ed`)
-by 0.150 ns on one path; the two fixes are described above. 49c is `7201c28`,
-released as `releases/SGIIndy_20260928.rbf` (md5
-`56024cac02e24502dd27c842e3f71e57`) - the board runs above are that file.
+by 0.150 ns on one path; the two fixes are described above. 49c is `7201c28`
+(rbf md5 `56024cac02e24502dd27c842e3f71e57`) - the board runs above are that
+file. It shipped in `releases/SGIIndy_20260928.rbf` as part of build 50, which
+adds the IRIX 6 user-mode fix ([irix6-user-mode.md](irix6-user-mode.md)); build
+50 draws the same menus.
 
 Open question, not the display: in these runs the highlight of a menu posted
 by a click did not follow pointer motion (ws `mouseMove`), while the arrow keys
