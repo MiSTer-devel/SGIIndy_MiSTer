@@ -45,7 +45,7 @@ reference disagree, the reference is current.
 | [REX3 rendering](design/rex3-rendering.md) | the graphics engine's full command set, and the bench that checks it against IRIS |
 | [REX3 source audit](design/rex3-source-audit.md) | REX3 against SGI's specs, the guest's own GL libraries, IRIS and MAME, and the plan that followed |
 | [Audio](design/audio.md) | HAL2 and HPC3's PBUS DMA: what the PROM and IRIX's audio driver were read to need, the sample path, and the bench that plays the PROM's startup tune |
-| [Ethernet plan (draft)](design/ethernet-plan.md) | not built yet: the SEEQ 80C03 and HPC3's Ethernet DMA in RTL, a frame mailbox to Main, the MAC address and OSD requirements, phases and budget |
+| [Ethernet plan](design/ethernet-plan.md) | not built yet: what IRIX's `if_ec2` needs (read from the binary), a register window in the FPGA with the SEEQ and the descriptor engines in Main, the address, the OSD row, phases and budget |
 
 ## History
 
