@@ -15,8 +15,8 @@ eight, and reading the log is a byte-reverse of every doubleword. The same rule
 is why ddr3_peek.py's hexdump of the PROM reads backwards in fours.
 
 Addresses are ARM physical. rtl/sgi/sgi_indy.sv puts guest RAM at 0x08000000
-and rtl/mister/ddr3_mux.sv puts the base of that region at 0x30000000, so
-guest physical 0x08100000 is ARM 0x30100000.
+and rtl/mister/ddr3_mux.sv puts the base of that region at 0x38000000, so
+guest physical 0x08100000 is ARM 0x38100000.
 
 Usage (on the MiSTer):
     read_log.py              print the log, then the exception record if any
@@ -29,7 +29,7 @@ import sys
 
 PEEK = "/media/fat/sgidbg/ddr3_peek.py"
 
-RAM_ARM   = 0x30000000            # guest physical 0x08000000
+RAM_ARM   = 0x38000000            # guest physical 0x08000000
 MEMLOG    = RAM_ARM + 0x100000    # guest 0xA8100000
 MEMLOG_MAGIC = 0x494C4F47         # 'ILOG'
 MEMLOG_CAP   = 0x80000

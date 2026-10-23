@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # setopt.sh [name=value ...] - set the core's OSD options without the OSD.
 #
-# MiSTer keeps a core's OSD state in /media/fat/config/<CORENAME>.CFG: sixteen
-# bytes, the 128-bit `status` word, little-endian bit order (bit N is bit N%8 of
+# MiSTer keeps a core's OSD state in /media/fat/config/<CORENAME>_v<N>.CFG,
+# N being CONF_STR's config version (`v,1;` - plain <CORENAME>.CFG for v,0,
+# which this core used up to build 50): sixteen bytes, the 128-bit `status` word, little-endian bit order (bit N is bit N%8 of
 # byte N/8). It is read once when the core starts, so this writes the file and
 # the caller relaunches.
 #
@@ -14,9 +15,9 @@
 #
 # Names match CONF_STR in sgiindy.sv. Keep them in step.
 #
-#   gfx=none|fitted      O[10]     graphics board
+#   gfx=none|fitted      O[10]     Display: Serial console | Graphics
 #   cache=on|off         O[11]     primary caches
-#   mem=48|32|64         O[13:12]  memory size
+#   mem=32|48|64|128     O[13:12]  memory size
 #   viddbg=off|raw       O[14]     show the frame buffer index, no palette
 #   uartdbg=off|sys|ser  O[16:15]  0x55 test pattern from clk_sys or sclk
 #   scsicache=on|off     O[17]     the SCSI block cache (docs/design/scsi-block-cache.md); off = every
@@ -31,6 +32,10 @@
 #                                  buffer (build 46); off = every instruction
 #                                  fill one 4-word read, as before
 #   dpf=on|off           status[22], no OSD entry: its data buffer (build 47)
+#   swap=no|yes          O[23]     Swap Alt/Win keys (acts at once)
+#
+# lookahead, dinstrict, ipf and dpf are rows on P9 Debug in a debug build
+# (SGIINDY_DEBUG); a release build has no row for them, or for viddbg/uartdbg.
 #
 # Usage: bash scripts/setopt.sh gfx=none uartdbg=ser
 #        bash scripts/setopt.sh            # all defaults
@@ -49,7 +54,7 @@ import sys
 FIELDS = {                       # name: (low bit, width, {value: code})
     "gfx":     (10, 1, {"fitted": 0, "none": 1}),
     "cache":   (11, 1, {"on": 0, "off": 1}),
-    "mem":     (12, 2, {"48": 0, "32": 1, "64": 2}),
+    "mem":     (12, 2, {"32": 0, "48": 1, "64": 2, "128": 3}),
     "viddbg":  (14, 1, {"off": 0, "raw": 1}),
     "uartdbg": (15, 2, {"off": 0, "sys": 1, "ser": 2}),
     "scsicache": (17, 1, {"on": 0, "off": 1}),
@@ -61,6 +66,7 @@ FIELDS = {                       # name: (low bit, width, {value: code})
     # No OSD entry: ram_arb's instruction prefetch buffer.
     "ipf":     (21, 1, {"on": 0, "off": 1}),
     "dpf":     (22, 1, {"on": 0, "off": 1}),
+    "swap":    (23, 1, {"no": 0, "yes": 1}),
 }
 st = 0
 for arg in sys.argv[1:]:
@@ -79,7 +85,9 @@ PY
 RC=$?
 [ $RC -eq 0 ] || { rm -f "$TMP"; exit $RC; }
 
-CFG="/media/fat/config/$(echo "$MISTER_GAMES_DIR" | tr '[:lower:]' '[:upper:]').CFG"
+# The config version in sgiindy.sv's CONF_STR (`v,1;`). Keep them in step.
+CFG_VER=1
+CFG="/media/fat/config/$(echo "$MISTER_GAMES_DIR" | tr '[:lower:]' '[:upper:]')_v${CFG_VER}.CFG"
 scp -q -o StrictHostKeyChecking=no -i "$MISTER_SSH_KEY" "$TMP" \
     "$MISTER_SSH_USER@$MISTER_HOST:$CFG"
 rm -f "$TMP"

@@ -276,8 +276,8 @@ and a block cache between the targets and the SD card.
   answers reads from block RAM, prefetches, and moves up to eight sectors per
   HPS transaction; the OSD's **SCSI cache: Off** bypasses it
   ([scsi-block-cache.md](../design/scsi-block-cache.md)).
-- On MiSTer the OSD's three image slots are **SCSI ID1**, **SCSI ID2** and
-  **SCSI ID6 CD**; in simulation `--disk ID=PATH` attaches an image.
+- On MiSTer the OSD's three image slots are **Pri. disk (ID 1)**, **Disk (ID 2)**
+  and **CD-ROM (ID 6)**; in simulation `--disk ID=PATH` attaches an image.
 
 POST's data path test and SCSI controller diagnostic both pass, the PROM boots
 from the disk, IRIX runs from it and installs onto it from the CD. What the
