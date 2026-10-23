@@ -6,9 +6,9 @@ tables; the full reports stay in `output_files/`.
 
 | | |
 |---|---|
-| bitstream | `sgiindy.rbf`, 4436960 bytes, md5 `3b3b7483339dbd31fcee94b54569d70b` |
-| built | 2026-10-23 08:17 |
-| fitter seed | 5 |
+| bitstream | `sgiindy.rbf`, 4414232 bytes, md5 `9eecf4eb02d0a2fd143608689f373e07` |
+| built | 2026-10-23 11:04 |
+| fitter seed | 2 |
 | Quartus | 17.0.2 Build 602 07/19/2017 SJ Lite Edition |
 | device | 5CSEBA6U23I7 (Cyclone V) |
 
@@ -16,8 +16,8 @@ tables; the full reports stay in `output_files/`.
 
 | resource | used |
 |---|---|
-| Logic utilization (in ALMs) | 36,593 / 41,910 ( 87 % ) |
-| Total registers | 40994 |
+| Logic utilization (in ALMs) | 36,827 / 41,910 ( 88 % ) |
+| Total registers | 40959 |
 | Total block memory bits | 3,795,857 / 5,662,720 ( 67 % ) |
 | Total RAM Blocks | 492 / 553 ( 89 % ) |
 | Total DSP Blocks | 57 / 112 ( 51 % ) |
@@ -31,12 +31,12 @@ must be positive; a negative one is a failed timing check.
 
 | clock | setup | hold | recovery | removal | min pulse width |
 |---|---:|---:|---:|---:|---:|
-| HDMI pixel clock | 0.116 | 0.220 | 3.822 | 0.928 | 1.933 |
-| core clock (clk_sys, 50 MHz) | 0.293 | 0.244 | 7.399 | 0.696 | 8.562 |
-| HPS bridge clock | 3.790 | 0.391 | 7.236 | 1.235 | 3.602 |
-| FPGA_CLK1_50 | 6.862 | 0.308 | 16.056 | 1.096 | 9.211 |
-| FPGA_CLK2_50 | 12.314 | 0.419 |  |  | 9.218 |
-| audio clock | 15.199 | 0.406 |  |  | 18.900 |
+| HDMI pixel clock | 0.282 | 0.225 | 3.813 | 1.494 | 1.931 |
+| core clock (clk_sys, 50 MHz) | 1.222 | 0.212 | 8.111 | 1.101 | 8.562 |
+| HPS bridge clock | 4.102 | 0.348 | 8.146 | 1.247 | 3.597 |
+| FPGA_CLK1_50 | 8.192 | 0.286 | 15.048 | 1.546 | 9.208 |
+| FPGA_CLK2_50 | 12.859 | 0.390 |  |  | 9.212 |
+| audio clock | 14.882 | 0.269 |  |  | 18.931 |
 
 **Timing met in every check.**
 
@@ -48,19 +48,19 @@ HPS bridges.
 
 | block | instance | ALMs | registers | M10K | DSP |
 |---|---|---:|---:|---:|---:|
-| **the whole machine** | `u_core` | 25679.4 | 26580 | 393 | 30 |
-| eeprom_93c56 | `u_eeprom` | 101.7 | 113 | 1 | 0 |
-| i8042 | `u_kbd` | 143.9 | 128 | 1 | 0 |
-| newport | `u_newport` | 5550.1 | 5666 | 202 | 8 |
-| r4300_bus | `u_bus` | 152.0 | 421 | 0 | 0 |
-| r4300_wrap | `u_cpu` | 9249.0 | 9361 | 33 | 18 |
-| ram_arb | `u_ram_arb` | 322.0 | 245 | 2 | 0 |
-| sgi_ds1386 | `u_rtc` | 217.3 | 228 | 8 | 0 |
-| sgi_hpc3 | `u_hpc3` | 1840.5 | 2163 | 2 | 4 |
-| sgi_ioc | `u_ioc` | 362.5 | 497 | 0 | 0 |
-| sgi_mc | `u_mc` | 1441.8 | 1739 | 0 | 0 |
-| sgi_memmap | `u_memmap` | 151.5 | 26 | 0 | 0 |
-| sgi_memmap | `u_memmap_dma` | 134.0 | 24 | 0 | 0 |
-| sgi_scc | `u_scc` | 427.3 | 836 | 0 | 0 |
-| sgi_scsi | `u_scsi0` | 4904.7 | 3993 | 144 | 0 |
+| **the whole machine** | `u_core` | 25882.7 | 26540 | 393 | 30 |
+| eeprom_93c56 | `u_eeprom` | 101.2 | 110 | 1 | 0 |
+| i8042 | `u_kbd` | 205.9 | 137 | 1 | 0 |
+| newport | `u_newport` | 5628.5 | 5682 | 202 | 8 |
+| r4300_bus | `u_bus` | 127.9 | 421 | 0 | 0 |
+| r4300_wrap | `u_cpu` | 9277.5 | 9354 | 33 | 18 |
+| ram_arb | `u_ram_arb` | 315.2 | 245 | 2 | 0 |
+| sgi_ds1386 | `u_rtc` | 205.0 | 234 | 8 | 0 |
+| sgi_hpc3 | `u_hpc3` | 1855.3 | 2154 | 2 | 4 |
+| sgi_ioc | `u_ioc` | 376.1 | 500 | 0 | 0 |
+| sgi_mc | `u_mc` | 1461.5 | 1729 | 0 | 0 |
+| sgi_memmap | `u_memmap` | 159.4 | 26 | 0 | 0 |
+| sgi_memmap | `u_memmap_dma` | 129.8 | 24 | 0 | 0 |
+| sgi_scc | `u_scc` | 426.4 | 813 | 0 | 0 |
+| sgi_scsi | `u_scsi0` | 4930.7 | 3981 | 144 | 0 |
 
