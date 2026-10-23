@@ -21,6 +21,12 @@ Build 26 (2026-09-08), with the CD-ROM slot added in build 27 (section 6).
 > `--scsi-nocache` are gone, and status bit 17 is reserved. The rest of this
 > note describes builds 26-51; `git show 113ffdb:rtl/scsi/scsi_cache.sv` has
 > the module.
+>
+> Build 52 (m900 seed 2, rbf md5 `90ba4eda`): 34,720 ALMs (83 %, was 36,827)
+> and 396 RAM blocks (was 492); core +0.780 ns, HDMI +0.370 ns. On .143 with
+> Main `scsi-consolidated` 39dcac1 at 128 MB: IRIX 5.3 boots, the disk check
+> passes in 16 s, 32 MB read raw off the CD-ROM match the ISO's sum (0.87
+> MB/s), cpu-tests 2752 passed / 3 failed (the known `umode/fetch_miss_entry`).
 
 ## Summary
 
