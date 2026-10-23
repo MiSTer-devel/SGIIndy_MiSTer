@@ -107,7 +107,6 @@ CPUTEST_V = \
 	$(RTL)/sgi/sgi_ioc.sv \
 	$(RTL)/sgi/i8042.sv \
 	$(RTL)/scsi/sgi_scsi.sv \
-	$(RTL)/scsi/scsi_cache.sv \
 	$(RTL)/scsi/wd33c93.sv \
 	$(RTL)/scsi/scsi.v \
 	$(RTL)/scsi/cd_audio.sv \
@@ -149,21 +148,10 @@ cputest: $(RTL)/cpu/generated/r4300_wrap.v
 	   -o Vsim_top $(CPUTEST_V) $(CPUTEST_C)
 
 
-# --- the SCSI block cache's own bench (docs/design/scsi-block-cache.md) -----------------------------
-# rtl/scsi/scsi_cache.sv against an engine-like requester and a slow device
-# model with random latency: prefetch, write-behind, re-base, passthrough,
-# mount invalidation, a random mix, the installer's burst, multi-block
-# transactions, and the OSD bypass. Ported with the module from
-# MacQuadra800_MiSTer; --binary --timing because the bench is procedural.
-#   make -C verilator tb_scsi_cache
+# --- the procedural benches (--binary --timing): their shared warning set ----
+# tb_scsi_cache used it first; the block cache and its bench went in build 52.
 TBC_W = -Wno-fatal -Wno-WIDTH -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-UNSIGNED -Wno-CMPCONST \
         -Wno-DECLFILENAME -Wno-CASEINCOMPLETE -Wno-BLKSEQ -Wno-MULTIDRIVEN -Wno-SYNCASYNCNET -Wno-COMBDLY
-tb_scsi_cache:
-	$V --binary --timing $(TBC_W) +define+SIMULATION=1 +define+VERILATOR=1 +incdir+$(RTL)/scsi \
-	   --top-module tb_scsi_cache --Mdir ./obj_dir_tbc -o tb_scsi_cache \
-	   tb_scsi_cache.sv $(RTL)/scsi/scsi_cache.sv
-	./obj_dir_tbc/tb_scsi_cache
-
 # --- the DS1386 against the MiSTer's clock (docs/design/r4600-accuracy-clock-disk.md) --------------------------
 # rtl/sgi/sgi_ds1386.sv's time registers loaded from hps_io's RTC: every field,
 # the 1940-based year, the weekday, a time sent during reset, resets keeping the
@@ -219,22 +207,6 @@ tb_scsidma:
 tb_ipf:
 	$V --binary --timing $(TBC_W) --top-module tb_ipf --Mdir ./obj_dir_tbipf -o tb_ipf 	   tb_ipf.sv $(RTL)/sgi/ram_arb.sv
 	./obj_dir_tbipf/tb_ipf
-
-# The bench in the shape sgi_scsi.sv instantiates since build 27: the CD slot
-# cached with a 64-sector window and multi-block on (CACHE_CD = 1, SECT2 = 64,
-# MB_CD = 1).
-tb_scsi_cache_sgi:
-	$V --binary --timing $(TBC_W) +define+SIMULATION=1 +define+VERILATOR=1 +incdir+$(RTL)/scsi \
-	   +define+CACHE_CD_TB=1 +define+CACHE_S2_TB=64 +define+MB_CD_TB=1 \
-	   --top-module tb_scsi_cache --Mdir ./obj_dir_tbc_sgi -o tb_scsi_cache_sgi \
-	   tb_scsi_cache.sv $(RTL)/scsi/scsi_cache.sv
-	./obj_dir_tbc_sgi/tb_scsi_cache_sgi
-
-# The build 26 shape: the CD slot passes through and has no store (CACHE_CD = 0,
-# SECT2 = 0).
-tb_scsi_cache_nocd:
-	$V --binary --timing $(TBC_W) +define+SIMULATION=1 +define+VERILATOR=1 +incdir+$(RTL)/scsi 	   +define+CACHE_CD_TB=0 +define+CACHE_S2_TB=0 	   --top-module tb_scsi_cache --Mdir ./obj_dir_tbc_nocd -o tb_scsi_cache_nocd 	   tb_scsi_cache.sv $(RTL)/scsi/scsi_cache.sv
-	./obj_dir_tbc_nocd/tb_scsi_cache_nocd
 
 # --- whole-machine headless harness (builds on Verilator 5.020) ------------
 # The same sim_top as `cputest`, but with the three flags that Verilator 5.020

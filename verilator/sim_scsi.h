@@ -10,8 +10,9 @@
 // instant ack hides every ordering bug in the requester's buffer handling -
 // the kind that then only appears on hardware.
 //
-// MULTI-BLOCK (docs/design/scsi-block-cache.md). The block cache in rtl/scsi/sgi_scsi.sv asks for up
-// to eight sectors at a time: scsi_sd_blk_cnt is blocks minus one, and the
+// MULTI-BLOCK (docs/design/scsi-block-cache.md). Builds 26-51's block cache in rtl/scsi/sgi_scsi.sv
+// asked for up to eight sectors at a time (one since build 52, but the harness
+// still serves any count): scsi_sd_blk_cnt is blocks minus one, and the
 // run streams through the 13-bit scsi_sd_buff_addr as (n+1)*256 consecutive
 // words from sd_lba upward - exactly what hps_io does when Main honours
 // sd_blk_cnt (user_io.cpp: blks = ((c >> 9) & 0x3F) + 1). One ack session

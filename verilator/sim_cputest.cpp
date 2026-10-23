@@ -203,9 +203,6 @@ struct Options {
     // board; the serial-console regressions turn it off, because the PROM
     // moves its console to the graphics head as soon as it finds one.
     bool        gfx = true;
-    // The SCSI block cache (docs/design/scsi-block-cache.md); --scsi-nocache clears it and every
-    // block request becomes one HPS transaction, the pre-build-26 path.
-    bool        scsi_cache = true;
     // The audio switch, and where --wav writes the DAC's output.
     bool        audio = false;
     bool        ipf = true;       // ram_arb's instruction prefetch buffer
@@ -335,8 +332,6 @@ static void usage()
         "                    names a wedge that has stopped touching the bus\n"
         "  --pc-from N       start the PC trace at cycle N (implies --pc)\n"
         "  --pc-count N      how many PCs to print (default 2000)\n"
-        "  --scsi-nocache    bypass the SCSI block cache (docs/design/scsi-block-cache.md): every block\n"
-        "                    request is one HPS transaction, as before build 26\n"
         "  --no-ipf          ram_arb's instruction prefetch buffer off (build 46)\n"
         "  --no-dpf          ...and its data buffer (build 47)\n"
         "  --audio           fit the audio (HAL2 reports itself present); the\n"
@@ -445,7 +440,6 @@ int main(int argc, char **argv)
         else if (a == "--no-dpf")     opt.dpf = false;
         else if (a == "--wav")        { opt.audio = true; opt.wav = next("--wav"); }
         else if (a == "--wav-rate")   opt.wav_rate = strtoul(next("--wav-rate"), nullptr, 0);
-        else if (a == "--scsi-nocache") opt.scsi_cache = false;
         else if (a == "--watch")       opt.watch.push_back(
                  static_cast<uint32_t>(strtoul(next("--watch"), nullptr, 16)) & ~7u);
         else if (a == "--uart")        opt.uart = true;
@@ -586,7 +580,6 @@ int main(int argc, char **argv)
     top->gfx_present = opt.gfx ? 1 : 0;
     top->icache_en   = opt.icache ? 1 : 0;
     top->dcache_en   = opt.dcache ? 1 : 0;
-    top->scsi_cache_bypass = opt.scsi_cache ? 0 : 1;
     top->audio_en    = opt.audio ? 1 : 0;
     top->ipf_en      = opt.ipf ? 1 : 0;
     top->dpf_en      = opt.dpf ? 1 : 0;

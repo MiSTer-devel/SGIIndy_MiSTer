@@ -328,8 +328,9 @@ scaler hides the difference.
 
 The layout is the computer-core [OSD standard](https://github.com/danifunker/hp9000-715_MiSTer/blob/master/docs/osd-standard.md)
 (since build 51): media and Memory on the top page, P1 Machine, P2 Video,
-P3 Input, P4 Audio, P5 Advanced, and P9 Debug only when `SGIINDY_DEBUG` is
-defined. `sgiindy.sv` latches `status` into `cfg` for the whole of every reset
+P3 Input, P4 Audio, and P9 Debug only when `SGIINDY_DEBUG` is defined
+(P5 Advanced held only *SCSI cache* and went with it in build 52; status bit
+17 is reserved and left out of *Changes pending*). `sgiindy.sv` latches `status` into `cfg` for the whole of every reset
 and every setting reads `cfg`, so a changed row does nothing until **Apply and
 reset** (`R[0]`) or any other reset; `status_menumask` bit 0 is "settings
 differ from `cfg`" and shows the *Changes pending* row (`h0-`). Only the media
@@ -348,7 +349,6 @@ keeps the settings in `SGIINDY_v1.CFG`.
 | P2 | Aspect ratio | `O[122:121]` | Original (5:4), Full Screen, and the two custom ratios |
 | P3 | Swap Alt/Win keys: No / Yes | `O[23]` | swaps set 2's left Alt (`11`) with left Win (`E0 1F`) and right Alt (`E0 11`) with right Win (`E0 27`) on the way into the i8042, which translates to set 3 when the guest asks for it (IRIX does); acts at once |
 | P4 | Audio: On / Off | `O[18]` | Off makes HAL2 report itself absent |
-| P5 | SCSI cache: On / Off | `O[17]` | the SCSI block cache (`rtl/scsi/scsi_cache.sv`, [scsi-block-cache.md](../design/scsi-block-cache.md)); Off makes every block request a single-sector HPS transaction |
 | P9 | Video debug: Off / Raw index | `O[14]` | shows the frame buffer's colour index as grey with CMAP taken out of the path (the cursor as white), and a line-cache miss as index `0x80` |
 | P9 | UART debug: Off / 0x55 clk_sys / 0x55 sclk | `O[16:15]` | replaces the SCC on `UART_TXD` with an endless 9600-baud `0x55` from either clock domain, to separate the SCC from the path to the HPS |
 | P9 | DATA IN look-ahead, DATA IN guard, I-fetch prefetch, D-fetch prefetch | `O[19]`..`O[22]` | the A/B switches `setopt.sh` calls `lookahead`, `dinstrict`, `ipf`, `dpf` |
@@ -510,7 +510,7 @@ it runs on `pll_locked` alone, so a guest reset does not stop it. Word 0 is
 | 10 | the PC entering decode and the CP0 debug bits, the pipeline's stall vector among them — what `prof.py` samples | `sgi_indy.sv` |
 | 11–14 | the MC's VDMA engine and its descriptors, REX3's beat counters, the display ID and mode entry being shown | `sgi_indy.sv`, `newport.sv` |
 | 15 | the line caches: drawing-plane misses, auxiliary misses, auxiliary lines skipped | `sgiindy.sv` |
-| 16–20 | SCSI disk-time counters: HPS transactions, busy and wait time, block cache hits and misses, DATA-phase bytes and time | `sgi_scsi.sv` |
+| 16–20 | SCSI disk-time counters: HPS transactions, busy and wait time, DATA-phase bytes and time (the block cache's hits and misses up to build 51, zero since) | `sgi_scsi.sv` |
 | 21–28 | CPU performance counters: instructions, stalls by stage, TLB walks, cache fills and their bus clocks | `sgi_indy.sv` |
 | 29–34 | the DDR3 port: clocks each master held it, clocks the CPU and the rasteriser waited, transactions, read latency | `sgiindy.sv`, `ddr3_mux.sv` |
 | 35 | instruction fills after an instruction TLB walk, and fills answered from a line already held | `sgi_indy.sv` |

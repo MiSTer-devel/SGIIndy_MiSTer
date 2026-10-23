@@ -36,7 +36,7 @@ reference disagree, the reference is current.
 |---|---|
 | [Newport pixel DMA](design/newport-vdma.md) | the MC's VDMA engine, and why X drew a black screen without it |
 | [SCSI fit and frame buffer layout](design/scsi-fit-and-framebuffer-layout.md) | fitting the SCSI subsystem, and the frame buffer at four bytes a pixel |
-| [SCSI block cache](design/scsi-block-cache.md) | the per-target read-ahead/write-behind cache between the SCSI targets and the SD card |
+| [SCSI block cache](design/scsi-block-cache.md) | the per-target read-ahead/write-behind cache between the SCSI targets and the SD card (builds 26-51; removed in build 52 for Main's write buffer) |
 | [SCSI synchronous negotiation](design/scsi-sync-negotiation.md) | a fifth of the boot lost to a failing negotiation, and the fix |
 | [Speed: TLB, instruction cache, counters](design/cpu-speed-tlb-icache.md) | where an IRIX session's time goes, measured |
 | [Cache fill latency](design/cache-fill-latency.md) | a line fill's clocks accounted for, line writes, the prefetch buffers, and a dirty miss's fill ahead of its victim |
