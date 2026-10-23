@@ -102,7 +102,6 @@ settings (so does any other reset). Shut IRIX down first - see below.
 | P2 Video | **Aspect ratio** | how the scaler fits the picture |
 | P3 Input | **Swap Alt/Win keys** | *Yes* swaps the left and right Alt and Win keys |
 | P4 Audio | **Audio** | *On* fits the HAL2 audio processor. *Off* makes the machine report no audio hardware, so the PROM plays no chime and IRIX loads no audio driver |
-| P5 Advanced | **SCSI cache** | *On* caches disk blocks in the FPGA, which makes disk access much faster |
 
 A debug build (`SGIINDY_DEBUG` defined) adds **P9 Debug** with the bring-up
 instruments: the frame buffer's raw colour indices, UART test patterns, and the
@@ -179,8 +178,7 @@ part of the machine was built and verified.
   [Killer Instinct](https://github.com/MiSTer-devel/Arcade-KillerInstinct_MiSTer)
   arcade core, itself derived from the [N64](https://github.com/MiSTer-devel/N64_MiSTer)
   core's R4300i. `rtl/cpu/r4300/UPSTREAM.md` records every local change.
-- The SCSI target from the MiSTer MacLC core, and the SCSI block cache from the
-  MacQuadra800 core.
+- The SCSI target from the MiSTer MacLC core.
 - The DE1-based SGI reverse-engineering work this core grew out of: OzOnE.
 - IRIS, the SGI Indy emulator, used throughout as the reference model and as the
   source of the bare-metal MIPS CPU test suite.

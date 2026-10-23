@@ -3,13 +3,11 @@
 //
 //  Three jobs: decode the two byte-wide ports out of a 64-bit big-endian bus
 //  access, wire the initiator to an array of scsi.v targets, and do the bus
-//  arbitration between them. Since docs/design/scsi-block-cache.md a fourth: the block cache between
-//  the targets and hps_io (rtl/scsi/scsi_cache.sv, ported from
-//  MacQuadra800_MiSTer), which answers the targets' sector reads from block
-//  RAM, prefetches behind them, accepts their writes at RAM speed and
-//  flushes in the background - in 8-sector transactions on the HPS side.
-//  scsi.v is unchanged: the cache offers it exactly the io_rd/io_wr/io_ack/
-//  sd_buff_* contract hps_io did.
+//  arbitration between them. A fourth: one block-port transaction at a time
+//  between the three slotted targets and hps_io. Builds 26-51 had a block
+//  cache there (rtl/scsi/scsi_cache.sv); Main's write buffer replaced it in
+//  build 52, see "the block port" below. scsi.v sees exactly the
+//  io_rd/io_wr/io_ack/sd_buff_* contract hps_io offers.
 //
 //  ARBITRATION. Every target drives bsy/msg/cd/io/req/dout, and exactly one
 //  should be answering at a time - the one that won selection. They are
@@ -56,25 +54,12 @@ module sgi_scsi #(
     // The default below is a disk on 1, a spare disk on 2, and the CD-ROM on
     // 6. Set a bit to add a target back; the port widths do not change.
     //
-    // THE BLOCK CACHE HAS THREE SLOTS, AND THEY ARE THESE THREE IDS
+    // THE BLOCK PORT HAS THREE SLOTS, AND THEY ARE THESE THREE IDS
     // (SLOT0_ID..SLOT2_ID below, in the order sgiindy.sv's menu slots 1..3
     // take them). A target enabled on any other ID would elaborate but never
     // reach hps_io: its io_ack is tied low and its request lines go nowhere.
-    // Add a slot to the cache before adding a fourth target.
-    parameter logic [6:0] TARGET_EN = 7'b100_0110,
-
-    // Cache geometry, in 512-byte sectors per slot: two disks and the CD-ROM.
-    // 64 + 64 + 64 sectors = 96 KB of M10K, 96 blocks (build 27); the CD
-    // slot has the same window as a disk because an install reads the disc
-    // sequentially through scsi.v's 32-sector ring, and a 16-sector window
-    // (the Mac's) re-bases every 8 KB with a demand miss each time. With
-    // CACHE_CD = 0 the CD slot has no store and passes straight through
-    // (build 26: 64 KB, 64 M10Ks). The bench runs both shapes:
-    // `make -C verilator tb_scsi_cache_sgi` and `tb_scsi_cache_nocd`.
-    parameter int CACHE_SECT0 = 64,
-    parameter int CACHE_SECT1 = 64,
-    parameter int CACHE_SECT2 = 64,
-    parameter int CACHE_CD    = 1
+    // Add a slot to the block port before adding a fourth target.
+    parameter logic [6:0] TARGET_EN = 7'b100_0110
 )(
     input  logic        clk,
     input  logic        reset,
@@ -102,10 +87,9 @@ module sgi_scsi #(
     input  logic  [7:0] dma_rdata,
 
     // ---- block device, from hps_io / the harness -------------------------
-    // Per SCSI ID, as before; what changed with the cache is that a
-    // transaction can now be up to eight sectors (sd_blk_cnt = 7), streamed
-    // through the 13-bit sd_buff_addr, and that sd_lba / sd_buff_din carry
-    // the cache's one live transaction rather than each target's own.
+    // Per SCSI ID; sd_lba / sd_buff_din carry the block port's one live
+    // transaction rather than each target's own, and sd_blk_cnt is 0 (one
+    // sector per transaction) since the block cache went in build 52.
     input  logic [NUM_TARGETS-1:0]  img_mounted,
     input  logic [31:0]             img_blocks,
     output logic [31:0]             sd_lba      [NUM_TARGETS],
@@ -118,9 +102,6 @@ module sgi_scsi #(
     output logic [15:0]             sd_buff_din [NUM_TARGETS],
     input  logic                    sd_buff_wr,
 
-    // The OSD's "SCSI cache: Off": every request passes straight through to
-    // hps_io, one sector per transaction, as before docs/design/scsi-block-cache.md.
-    input  logic                    cache_bypass,
     // The WD33C93B's DATA IN look-ahead, a runtime instrument (wd33c93.sv).
     input  logic                    din_lookahead_en,
     // The DATA IN capture waits for the target's buffers (wd33c93.sv).
@@ -133,7 +114,8 @@ module sgi_scsi #(
     // SGI: the disk-time counters (docs/design/scsi-block-cache.md), five more beacon words: how many
     // HPS transactions, how long the HPS channel and the targets' block ports
     // were busy, how long the SCSI bus was, how many bytes crossed it in DATA
-    // phases, and the cache's hits / misses / writes. Counters, not state:
+    // phases (and, up to build 51, the block cache's hits / misses / writes,
+    // zero since). Counters, not state:
     // read twice, subtract, and the difference is the boot's disk seconds.
     output logic [63:0]             dbg_stat [8]
 );
@@ -170,7 +152,7 @@ module sgi_scsi #(
     wire [31:0]            t_lba  [NUM_TARGETS];
     wire [15:0]            t_din  [NUM_TARGETS];
     // The targets' block-port request lines and the ack each one gets back,
-    // at module scope for the same reason: the cache's three slots pick them
+    // at module scope for the same reason: the block port's three slots pick them
     // out by ID below.
     wire [NUM_TARGETS-1:0] t_rd, t_wr, t_ack;
     // Per-target beacon taps (docs/28); zeros for targets not built.
@@ -241,86 +223,107 @@ module sgi_scsi #(
         .dbg_bcn   (wd_bcn)
     );
 
-    // ---- the block cache ---------------------------------------------------
-    // The three cache slots and the IDs they serve. sgiindy.sv maps hps_io's
-    // menu slots 1, 2, 3 onto IDs 1, 2, 6 in this same order.
+    // ---- the block port: one HPS transaction at a time ---------------------
+    // The three slots and the IDs they serve. sgiindy.sv maps hps_io's menu
+    // slots 1, 2, 3 onto IDs 1, 2, 6 in this same order.
     localparam int SLOT0_ID = 1;
     localparam int SLOT1_ID = 2;
     localparam int SLOT2_ID = 6;
 
-    // The engine side of the cache: what the targets used to get from hps_io.
-    // One transaction at a time, so the buffer buses are shared and the ack
-    // says whose it is.
-    wire [31:0] e_lba;
-    wire  [2:0] e_rd, e_wr, e_ack;
-    wire [12:0] e_buff_addr;
-    wire [15:0] e_buff_dout, e_buff_din;
-    wire        e_buff_wr;
-    // The platform side: what hps_io now sees.
-    wire [31:0] p_lba;
-    wire  [5:0] p_blk_cnt;
-    wire  [2:0] p_rd, p_wr, p_ack;
-    wire [15:0] p_buff_din;
-    wire [31:0] cache_hits, cache_misses, cache_writes;
+    // NO BLOCK CACHE SINCE BUILD 52. Builds 26-51 had rtl/scsi/scsi_cache.sv
+    // here (ported from MacQuadra800): 96 KB of M10K that answered sector
+    // reads, prefetched, and took writes at RAM speed. Once Main buffered this
+    // core's writes (Main_MiSTer support/sgi/sgi_disk.cpp, the Mac/HP 9000
+    // write buffer) the cache saved ~2 s of disk wait per IRIX boot - 8.5 s
+    // against 10.5 s at the login screen on .143 - and nothing on a disk-check
+    // workload (16 s either way), for ~2,000 ALMs and 96 M10K that Ethernet
+    // needed. What is left is the cache's own passthrough, the path that
+    // measurement ran with "SCSI cache: Off": one target's request at a time,
+    // slot 0 before 1 before 2, one sector per transaction, hps_io's ack and
+    // buffer writes handed to the target a clock later, its read-back word
+    // straight out. scsi.v writes its buffer on sd_buff_wr without looking at
+    // its own ack, so the shared buffer bus is safe only because one
+    // transaction is ever live - which is what this serialises.
+    logic [31:0] e_lba;
+    logic  [2:0] e_rd, e_wr;
+    logic  [2:0] e_ack       = 3'b000;
+    logic [12:0] e_buff_addr;
+    logic [15:0] e_buff_dout, e_buff_din;
+    logic        e_buff_wr   = 1'b0;
+    logic [31:0] p_lba       = 32'd0;
+    logic  [5:0] p_blk_cnt;
+    logic  [2:0] p_rd        = 3'b000;
+    logic  [2:0] p_wr        = 3'b000;
+    logic  [2:0] p_ack;
+    logic  [2:0] p_ack_d     = 3'b000;
+    logic [15:0] p_buff_din;
+    localparam logic [1:0] PT_IDLE = 2'd0, PT_REQ = 2'd1, PT_XFER = 2'd2;
+    logic  [1:0] pt_st       = PT_IDLE;
+    logic  [1:0] pt_slot     = 2'd0;
+    logic        pt_eng      = 1'b0;    // the target that asked is still waiting for it
 
     assign e_rd = { t_rd[SLOT2_ID], t_rd[SLOT1_ID], t_rd[SLOT0_ID] };
     assign e_wr = { t_wr[SLOT2_ID], t_wr[SLOT1_ID], t_wr[SLOT0_ID] };
-    // The cache takes slot 0's request before slot 1's before slot 2's, and
-    // samples e_lba in the same cycle, so the LBA has to be chosen by the
-    // same priority.
+    // Slot 0's request is taken before slot 1's before slot 2's, and the LBA
+    // is sampled in the same cycle, so it is chosen by the same priority.
     assign e_lba = (e_rd[0] | e_wr[0]) ? t_lba[SLOT0_ID] :
                    (e_rd[1] | e_wr[1]) ? t_lba[SLOT1_ID] : t_lba[SLOT2_ID];
-    // A write is read out of the target the cache is acking. `sd_buff_din` is
-    // the port-A read of a registered dual-port RAM inside the target, so it
-    // carries the pair for whatever address was presented ONE clock earlier -
-    // the cache's E_WR_A/B/C sequence samples with exactly that delay, as the
-    // harness did before it (verilator/sim_scsi.h).
+    // A write is read out of the target being acked. `sd_buff_din` is the
+    // port-A read of a registered dual-port RAM inside the target, one clock
+    // behind the address it was given; the harness samples with that delay
+    // (verilator/sim_scsi.h) and hps_io reads a whole SPI word later.
     assign e_buff_din = e_ack[0] ? t_din[SLOT0_ID] :
                         e_ack[1] ? t_din[SLOT1_ID] : t_din[SLOT2_ID];
-    assign p_ack = { sd_ack[SLOT2_ID], sd_ack[SLOT1_ID], sd_ack[SLOT0_ID] };
+    assign p_ack      = { sd_ack[SLOT2_ID], sd_ack[SLOT1_ID], sd_ack[SLOT0_ID] };
+    assign p_blk_cnt  = 6'd0;
+    assign p_buff_din = e_buff_din;
 
-    scsi_cache #(
-        .SECT0   (CACHE_SECT0),
-        .SECT1   (CACHE_SECT1),
-        // A slot that passes through needs no store: the Mac build keeps the
-        // CD's 16 sectors allocated with CACHE_CD = 0, this one does not.
-        .SECT2   (CACHE_CD ? CACHE_SECT2 : 0),
-        .PF_DEPTH(8),
-        .CACHE_CD(CACHE_CD),
-        // The Mac needs its Main fork for multi-block CD reads because its
-        // CD slot serves CD-DA frames and a TOC blob at special block sizes;
-        // this core's CD is a flat ISO read as 512-byte blocks through the
-        // same generic path as a disk, which stock Main serves in 8-sector
-        // runs (user_io.cpp: blks = ((c >> 9) & 0x3F) + 1). So the CD slot
-        // works in groups like the disks.
-        .MB_CD   (1)
-    ) u_cache (
-        .clk        (clk),
-        .nreset     (~reset),
-        .e_lba      (e_lba),
-        .e_rd       (e_rd),
-        .e_wr       (e_wr),
-        .e_ack      (e_ack),
-        .e_buff_addr(e_buff_addr),
-        .e_buff_dout(e_buff_dout),
-        .e_buff_din (e_buff_din),
-        .e_buff_wr  (e_buff_wr),
-        .p_lba      (p_lba),
-        .p_blk_cnt  (p_blk_cnt),
-        .p_rd       (p_rd),
-        .p_wr       (p_wr),
-        .p_ack      (p_ack),
-        .p_buff_addr(sd_buff_addr),
-        .p_buff_dout(sd_buff_dout),
-        .p_buff_din (p_buff_din),
-        .p_buff_wr  (sd_buff_wr),
-        .img_mounted({ img_mounted[SLOT2_ID], img_mounted[SLOT1_ID], img_mounted[SLOT0_ID] }),
-        .img_blocks (img_blocks),
-        .bypass     (cache_bypass),
-        .stat_hits  (cache_hits),
-        .stat_misses(cache_misses),
-        .stat_writes(cache_writes)
-    );
+    wire [1:0] pt_pick = (e_rd[0] | e_wr[0]) ? 2'd0 : (e_rd[1] | e_wr[1]) ? 2'd1 : 2'd2;
+    wire [2:0] pt_bit  = 3'b001 << pt_pick;
+    // Live from the cycle hps_io's ack rises: the harness presents the first
+    // word in that same cycle.
+    wire       pt_live = (pt_st == PT_XFER) || ((pt_st == PT_REQ) && p_ack[pt_slot]);
+    wire       pt_fall = p_ack_d[pt_slot] && !p_ack[pt_slot];
+
+    // A machine reset lets a transaction hps_io has started run to its ack's
+    // fall, as the cache's channel did, so hps_io never sees a request
+    // withdrawn; only the forwarding to the (now reset) target stops.
+    always_ff @(posedge clk) begin
+        p_ack_d   <= p_ack;
+        e_buff_wr <= 1'b0;
+        case (pt_st)
+            PT_IDLE: if (!reset && (|e_rd || |e_wr)) begin
+                pt_slot <= pt_pick;
+                pt_eng  <= 1'b1;
+                p_lba   <= e_lba;
+                if (|(e_wr & pt_bit)) p_wr <= pt_bit; else p_rd <= pt_bit;
+                pt_st   <= PT_REQ;
+            end
+            // hps_io has taken it: drop the request, as scsi.v did when it
+            // faced hps_io itself.
+            PT_REQ:  if (p_ack[pt_slot]) begin
+                p_rd  <= 3'b000;
+                p_wr  <= 3'b000;
+                pt_st <= PT_XFER;
+            end
+            PT_XFER: if (pt_fall) pt_st <= PT_IDLE;
+            default: pt_st <= PT_IDLE;
+        endcase
+        if (pt_live && pt_eng) begin
+            e_ack[pt_slot] <= p_ack[pt_slot];
+            e_buff_addr    <= sd_buff_addr;
+            e_buff_dout    <= sd_buff_dout;
+            e_buff_wr      <= sd_buff_wr;
+            if (pt_fall) begin
+                e_ack  <= 3'b000;
+                pt_eng <= 1'b0;
+            end
+        end
+        if (reset) begin
+            e_ack  <= 3'b000;
+            pt_eng <= 1'b0;
+        end
+    end
 
     // ---- the targets -------------------------------------------------------
     // Disks everywhere except the IDs named by CDROM_IDS, which get CD-ROM
@@ -335,7 +338,7 @@ module sgi_scsi #(
         for (t = 0; t < NUM_TARGETS; t++) begin : g_target
             if (TARGET_EN[t]) begin : g_live
                 wire [15:0] unused_snd_l, unused_snd_r;
-                // Which cache slot serves this ID, or 3 for none. A localparam
+                // Which block-port slot serves this ID, or 3 for none. A localparam
                 // per generate iteration rather than a constant function or
                 // an unpacked-array parameter: the one shape every tool here
                 // agrees is a constant.
@@ -394,9 +397,8 @@ module sgi_scsi #(
                     .cd_snd_r       (unused_snd_r),
                     .img_mounted    (img_mounted[t]),
                     .img_blocks     (img_blocks),
-                    // The block port, on the cache's engine side. The buffer
-                    // buses are the cache's, shared; only the ack is this
-                    // target's own. A target with no cache slot gets no ack, ever
+                    // The block port. The buffer buses are shared; only the
+                    // ack is this target's own. A target with no slot gets no ack, ever
                     // (see TARGET_EN).
                     .io_lba         (t_lba[t]),
                     .io_rd          (t_rd[t]),
@@ -482,16 +484,15 @@ module sgi_scsi #(
     // invariant): with the disk and the CD requesting together, the
     // higher-numbered target's LBA won for BOTH, and the disk's block was
     // served from the CD's address. hps_io reads sd_lba[slot] for the slot it
-    // is servicing. With the cache in between there is exactly one platform
-    // transaction at a time, its LBA and read-back word are the cache's, and
+    // is servicing. With the block port in between there is exactly one platform
+    // transaction at a time, its LBA and read-back word are the port's, and
     // the same value on every ID's line is correct by construction: hps_io
     // only ever looks at the one whose request line is up.
     //
     // The write flush was tied to zero for as long as SCSI was first fitted,
     // which is why the DATA OUT path could look finished from the initiator's
-    // end and still put 512 zero bytes on the disk; it is the cache's port-B
-    // read now, registered one clock behind sd_buff_addr like the target's
-    // was, and the reader on the other side samples with that delay
+    // end and still put 512 zero bytes on the disk; it is the connected
+    // target's port-A read, registered one clock behind sd_buff_addr, and the reader on the other side samples with that delay
     // (verilator/sim_scsi.h; hps_io reads a whole SPI word later).
     always_comb
         for (int k = 0; k < NUM_TARGETS; k++) begin
@@ -532,7 +533,7 @@ module sgi_scsi #(
             st_din_ini <= 38'd0; st_din_tgt <= 38'd0; st_dout_ini <= 38'd0; st_dout_tgt <= 38'd0;
         end else begin
             // At the rising edge of the ack the request line is still up
-            // (the cache drops it on seeing the ack), so the direction is
+            // (the block port drops it on seeing the ack), so the direction is
             // readable there.
             if (|sd_ack && !ack_d) begin
                 if (|sd_wr) st_xact_wr <= st_xact_wr + 32'd1;
@@ -556,9 +557,12 @@ module sgi_scsi #(
     end
     assign dbg_stat[0] = { st_xact_rd, st_xact_wr };
     assign dbg_stat[1] = { st_hps_cyc[37:6], st_eng_cyc[37:6] };
-    assign dbg_stat[2] = { cache_hits, cache_misses };
+    // Word 18 and the low half of word 20 were the block cache's hits, misses
+    // and writes (beacon ver 9); zero since build 52, the layout kept for
+    // bcnread.py.
+    assign dbg_stat[2] = 64'd0;
     assign dbg_stat[3] = { st_data_bytes, st_bsy_cyc[37:6] };
-    assign dbg_stat[4] = { st_data_cyc[37:6], cache_writes };
+    assign dbg_stat[4] = { st_data_cyc[37:6], 32'd0 };
     assign dbg_stat[5] = { st_din_ini[37:6],  st_din_tgt[37:6] };
     assign dbg_stat[6] = { st_dout_ini[37:6], st_dout_tgt[37:6] };
     assign dbg_stat[7] = wd_din;

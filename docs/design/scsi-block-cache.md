@@ -2,6 +2,26 @@
 
 Build 26 (2026-09-08), with the CD-ROM slot added in build 27 (section 6).
 
+> **Removed in build 52 (2026-10-23).** Main_MiSTer now buffers this core's
+> writes (`support/sgi/sgi_disk.cpp`, the write buffer the Mac and HP 9000
+> cores use), which took over the job this cache did on the FPGA. Measured on
+> .143 with release SGIIndy_20261023 and a pristine IRIX 5.3 image at 128 MB,
+> guest disk wait at the login screen / a checksum-and-copy workload:
+>
+> | Main | FPGA cache | disk wait | workload | disk check |
+> |---|---|---|---|---|
+> | stock (O_SYNC per write) | off | 28.5 s | 35 s | PASS |
+> | with the write buffer | off | 10.5 s | 16 s | PASS |
+> | with the write buffer | on | 8.5 s | 16 s | PASS |
+>
+> With the write buffer the cache saved about 2 s of disk wait per boot and
+> nothing on the workload, for about 2,000 ALMs and 96 M10K, which went to
+> Ethernet. `rtl/scsi/sgi_scsi.sv` keeps the cache's passthrough (one
+> sector per transaction, one transaction at a time), the OSD row and
+> `--scsi-nocache` are gone, and status bit 17 is reserved. The rest of this
+> note describes builds 26-51; `git show 113ffdb:rtl/scsi/scsi_cache.sv` has
+> the module.
+
 ## Summary
 
 * **What was built:** `rtl/scsi/scsi_cache.sv`, the MacQuadra800 per-target

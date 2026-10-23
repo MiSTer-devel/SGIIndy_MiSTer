@@ -30,9 +30,6 @@ module sim_top
     // command line rather than by rebuilding. Both on for a normal run.
     input  wire        icache_en,
     input  wire        dcache_en,
-    // The SCSI block cache's OSD bypass (docs/design/scsi-block-cache.md): --scsi-nocache sets it,
-    // and a run with it on is the pre-build-26 block path, sector by sector.
-    input  wire        scsi_cache_bypass,
     // The OSD's audio switch. Off by default in the harness (--audio sets it):
     // with it on the PROM plays its startup tune, which costs every PROM
     // regression millions of cycles of DMA it is not there to test.
@@ -207,7 +204,6 @@ module sim_top
         .boot_pc       (boot_pc),
         .icache_en     (icache_en),
         .dcache_en     (dcache_en),
-        .scsi_cache_bypass(scsi_cache_bypass),
         .scsi_din_lookahead(1'b1),
         .scsi_din_strict(1'b1),
         .ipf_enable(ipf_en),

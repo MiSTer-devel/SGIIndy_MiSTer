@@ -20,8 +20,7 @@
 #   mem=32|48|64|128     O[13:12]  memory size
 #   viddbg=off|raw       O[14]     show the frame buffer index, no palette
 #   uartdbg=off|sys|ser  O[16:15]  0x55 test pattern from clk_sys or sclk
-#   scsicache=on|off     O[17]     the SCSI block cache (docs/design/scsi-block-cache.md); off = every
-#                                  block request one HPS transaction, as before
+#   (O[17] was scsicache=on|off, the SCSI block cache; reserved since build 52)
 #   audio=on|off         O[18]     HAL2 and the sample path (docs/design/audio.md); off =
 #                                  HAL2 reports itself absent, as before
 #   lookahead=on|off     status[19], no OSD entry: the WD33C93B's DATA IN
@@ -57,7 +56,6 @@ FIELDS = {                       # name: (low bit, width, {value: code})
     "mem":     (12, 2, {"32": 0, "48": 1, "64": 2, "128": 3}),
     "viddbg":  (14, 1, {"off": 0, "raw": 1}),
     "uartdbg": (15, 2, {"off": 0, "sys": 1, "ser": 2}),
-    "scsicache": (17, 1, {"on": 0, "off": 1}),
     "audio":   (18, 1, {"on": 0, "off": 1}),
     # No OSD entry: the WD33C93B's DATA IN look-ahead, an instrument.
     "lookahead": (19, 1, {"on": 0, "off": 1}),

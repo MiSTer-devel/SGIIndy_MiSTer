@@ -75,7 +75,7 @@ assign BUTTONS = 0;
 `include "build_id.v"
 // THE MENU FOLLOWS THE COMPUTER-CORE OSD STANDARD (danifunker/hp9000-715_MiSTer,
 // docs/osd-standard.md): media, Memory, then the submenus at fixed page numbers
-// - P1 Machine, P2 Video, P3 Input, P4 Audio, P5 Advanced, P9 Debug - and
+// - P1 Machine, P2 Video, P3 Input, P4 Audio, P9 Debug - and
 // "Apply and reset". Every setting is latched into `cfg` at reset (below); only
 // the media and the Input page act at once.
 //
@@ -89,6 +89,11 @@ assign BUTTONS = 0;
 // VERILOG_MACRO assignment in the .qsf). Its rows are the bring-up instruments;
 // the logic behind them stays in every build, so setopt.sh can still use them
 // on a release bitstream.
+//
+// P5 ADVANCED IS GONE since build 52: its one row, "SCSI cache" (status[17]),
+// went with the FPGA block cache, whose job Main's write buffer took over. Bit
+// 17 is reserved; a saved CFG may still hold it set, so nothing reads it and
+// "Changes pending" ignores it.
 localparam CONF_STR = {
 	"SGIIndy;;",
 	"-;",
@@ -125,7 +130,6 @@ localparam CONF_STR = {
 	"P2,Video;",
 	"P3,Input;",
 	"P4,Audio;",
-	"P5,Advanced;",
 `ifdef SGIINDY_DEBUG
 	"P9,Debug;",
 `endif
@@ -146,12 +150,6 @@ localparam CONF_STR = {
 	// so the PROM plays no tune and IRIX never loads its audio driver - the
 	// machine as it was before there was a sample path.
 	"P4O[18],Audio,On,Off;",
-
-	// THE SCSI BLOCK CACHE (docs/design/scsi-block-cache.md; rtl/scsi/scsi_cache.sv). Off makes every
-	// block request a single-sector HPS transaction again, as before build
-	// 26 - the control for measuring the cache on one bitstream, and the
-	// way out if it ever misbehaves. scripts/setopt.sh knows it as scsicache.
-	"P5O[17],SCSI cache,On,Off;",
 
 `ifdef SGIINDY_DEBUG
 	// A BRING-UP INSTRUMENT, NOT A FEATURE. The first hardware run drew a
@@ -207,8 +205,8 @@ reg [127:0] cfg;
 // "Changes pending": an OSD value differs from the running one. Every setting
 // field, and nothing else: not bit 0 (reset), not the Input page (bit 23 acts
 // at once and is never pending).
-wire osd_pending = {status[22:10], status[122:121]}
-                != {cfg[22:10],    cfg[122:121]};
+wire osd_pending = {status[22:18], status[16:10], status[122:121]}
+                != {cfg[22:18],    cfg[16:10],    cfg[122:121]};
 
 // 1280x1024 is 5:4. The Indy's own monitor was 5:4 and the PROM's boot screen
 // is drawn for it, so that is what "Original" means here.
@@ -248,10 +246,10 @@ assign sd_lba[0] = 0;
 assign sd_lba[1] = scsi_sd_lba[1];
 assign sd_lba[2] = scsi_sd_lba[2];
 assign sd_lba[3] = scsi_sd_lba[6];
-// Blocks per transaction, minus one. The block cache issues one transaction
-// at a time and says how long it is; hps_io reads the entry for the slot it
-// is servicing, so every slot carries the same value (docs/design/scsi-block-cache.md). Up to 8
-// sectors here; hps_io's own ceiling is 16 KB.
+// Blocks per transaction, minus one. sgi_scsi issues one transaction at a
+// time and says how long it is; hps_io reads the entry for the slot it is
+// servicing, so every slot carries the same value. Always 0 (one sector)
+// since the block cache went in build 52; builds 26-51 asked for up to 8.
 assign sd_blk_cnt[0] = 6'd0;
 assign sd_blk_cnt[1] = scsi_sd_blk_cnt;
 assign sd_blk_cnt[2] = scsi_sd_blk_cnt;
@@ -661,7 +659,6 @@ sgi_indy u_core
 	.scsi_sd_buff_dout(sd_buff_dout),
 	.scsi_sd_buff_din (scsi_sd_buff_din),
 	.scsi_sd_buff_wr  (sd_buff_wr),
-	.scsi_cache_bypass(cfg[17]),
 	// Bits 19-22 are rows only on a debug build's P9; on a release build
 	// scripts/setopt.sh sets them.
 	// status[19], setopt.sh lookahead=off: the WD33C93B's DATA IN look-ahead,

@@ -76,9 +76,9 @@ module sgi_indy #(
 
     // ---- SCSI block device ----------------------------------------------
     // One hps_io slot per target. On hardware these come from the HPS; in
-    // simulation from sim_blkdevice. Since docs/design/scsi-block-cache.md the block cache in
-    // sgi_scsi sits behind these: a transaction can be up to eight sectors
-    // (scsi_sd_blk_cnt = blocks - 1) streamed through the 13-bit address.
+    // simulation from sim_blkdevice. One transaction at a time across all of
+    // them (sgi_scsi's block port); scsi_sd_blk_cnt = blocks - 1 is 0 since
+    // the block cache went in build 52 (builds 26-51 streamed up to eight).
     input  logic  [6:0] scsi_img_mounted,
     input  logic [31:0] scsi_img_blocks,
     output logic [31:0] scsi_sd_lba [7],
@@ -89,9 +89,6 @@ module sgi_indy #(
     input  logic [12:0] scsi_sd_buff_addr,
     input  logic [15:0] scsi_sd_buff_dout,
     output logic [15:0] scsi_sd_buff_din [7],
-    // The OSD's "SCSI cache: Off" - every block request passes through the
-    // cache untouched, one sector per HPS transaction.
-    input  logic        scsi_cache_bypass,
     // The WD33C93B's DATA IN look-ahead (rtl/scsi/wd33c93.sv): on normally;
     // off is an instrument for the CD-install corruption hunt.
     input  logic        scsi_din_lookahead,
@@ -930,7 +927,6 @@ module sgi_indy #(
         .sd_buff_dout (scsi_sd_buff_dout),
         .sd_buff_din  (scsi_sd_buff_din),
         .sd_buff_wr   (scsi_sd_buff_wr),
-        .cache_bypass (scsi_cache_bypass),
         .din_lookahead_en (scsi_din_lookahead),
         .din_strict   (scsi_din_strict),
         .dbg_bcn      (dbg_scsi_bcn),
