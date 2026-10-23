@@ -179,8 +179,17 @@ module i8042 (
             mouse_resolution    <= 8'h02;
             mouse_sample_rate   <= 8'd100;
             arg_state           <= ARG_NONE;
-            key_tog_q           <= 1'b0;
-            mouse_tog_q         <= 1'b0;
+            // THE HOST'S TOGGLES ARE NOT RESET, SO THEY ARE COPIED, NOT CLEARED.
+            // hps_io flips ps2_key[10] / ps2_mouse[24] once per event and keeps
+            // them across a machine reset. Clearing these to 0 made the first
+            // clock after every reset with a toggle at 1 look like a new event:
+            // the last key or mouse packet was replayed into the output buffer
+            // while the PROM ran its controller self-test, which then failed -
+            // "PC keyboard/mouse controller diagnostic *FAILED* / Check or
+            // replace: CPU base board" after about half of all OSD resets
+            // (build 51, 3 of 5 on the board). verilator/tb_i8042.cpp.
+            key_tog_q           <= ps2_key[10];
+            mouse_tog_q         <= ps2_mouse[24];
             key_phase           <= 2'd0;
             mouse_phase         <= 2'd0;
             key_busy            <= 1'b0;
