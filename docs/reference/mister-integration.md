@@ -344,7 +344,7 @@ keeps the settings in `SGIINDY_v1.CFG`.
 | P1 | Primary caches: On / Off | `O[11]` | both primary caches, for bisecting a fault onto them without a rebuild |
 | P2 | Display: Graphics / Serial console | `O[10]` | whether Newport answers on the bus. **Fitting it moves the console off the serial port**: ARCS installs a DisplayController with `ConsoleOut\|Output` and the PROM stops printing to the SCC, so *Serial console* is a real machine configuration, not a degraded mode |
 | P2 | Aspect ratio | `O[122:121]` | Original (5:4), Full Screen, and the two custom ratios |
-| P3 | Swap Alt/Win keys: No / Yes | `O[23]` | swaps set 2's left Alt (`11`) with left Win (`E0 1F`) and right Alt (`E0 11`) with right Win (`E0 27`) on the way into the i8042; acts at once |
+| P3 | Swap Alt/Win keys: No / Yes | `O[23]` | swaps set 2's left Alt (`11`) with left Win (`E0 1F`) and right Alt (`E0 11`) with right Win (`E0 27`) on the way into the i8042, which translates to set 3 when the guest asks for it (IRIX does); acts at once |
 | P4 | Audio: On / Off | `O[18]` | Off makes HAL2 report itself absent |
 | P5 | SCSI cache: On / Off | `O[17]` | the SCSI block cache (`rtl/scsi/scsi_cache.sv`, [scsi-block-cache.md](../design/scsi-block-cache.md)); Off makes every block request a single-sector HPS transaction |
 | P9 | Video debug: Off / Raw index | `O[14]` | shows the frame buffer's colour index as grey with CMAP taken out of the path (the cursor as white), and a line-cache miss as index `0x80` |

@@ -14,6 +14,8 @@
 #include "Vi8042.h"
 #include <cstdio>
 #include <cstdint>
+#include <vector>
+#include <initializer_list>
 
 static Vi8042 *t;
 static int failures = 0;
@@ -51,11 +53,45 @@ static void reset_machine()
     t->reset = 0; tick(32);     // more than any sequencer needs to emit a packet
 }
 
-static void key(uint8_t code, bool pressed)
+static void key(uint8_t code, bool pressed, bool ext = false)
 {
     uint32_t tog = ((t->ps2_key >> 10) & 1) ^ 1;
-    t->ps2_key = (tog << 10) | ((pressed ? 1u : 0u) << 9) | code;
+    t->ps2_key = (tog << 10) | ((pressed ? 1u : 0u) << 9) | ((ext ? 1u : 0u) << 8) | code;
     tick(16);
+}
+
+// Everything the keyboard has queued, in order.
+static std::vector<uint8_t> bytes()
+{
+    std::vector<uint8_t> v;
+    while ((status() & 1) && v.size() < 64) v.push_back(data());
+    return v;
+}
+
+static bool is(const std::vector<uint8_t> &v, std::initializer_list<uint8_t> want)
+{
+    return v == std::vector<uint8_t>(want);
+}
+
+static void show(const std::vector<uint8_t> &v)
+{
+    printf("        got");
+    for (uint8_t b : v) printf(" %02X", b);
+    printf("\n");
+}
+
+// One key pressed and released, with what the guest should read for each.
+static void keycheck(const char *what, uint8_t code, bool ext,
+                     std::initializer_list<uint8_t> make,
+                     std::initializer_list<uint8_t> brk)
+{
+    key(code, true, ext);
+    auto m = bytes();
+    key(code, false, ext);
+    auto b = bytes();
+    bool ok = is(m, make) && is(b, brk);
+    check(what, ok);
+    if (!ok) { show(m); show(b); }
 }
 
 static void mouse(uint8_t b0, uint8_t dx, uint8_t dy)
@@ -112,6 +148,44 @@ int main()
     mouse(0x09, 7, 2);
     uint8_t m0 = (status() & 1) ? data() : 0, m1 = (status() & 1) ? data() : 0, m2 = (status() & 1) ? data() : 0;
     check("a real mouse packet arrives whole", m0 == 0x09 && m1 == 7 && m2 == 2);
+
+    // ---- scan-code set 3 -------------------------------------------------
+    // IRIX selects set 3 (keyboard command F0 03). hps_io keeps delivering set
+    // 2, so the controller translates. Before it did, IRIX read set 2's Left
+    // Alt (11) as its Left Ctrl and set 2's Left Ctrl (14) as Caps Lock.
+    printf("scan-code set 2 (the default)\n");
+    keycheck("Left Alt is 11 / F0 11", 0x11, false, {0x11}, {0xF0, 0x11});
+    keycheck("Right Alt is E0 11 / E0 F0 11", 0x11, true, {0xE0, 0x11}, {0xE0, 0xF0, 0x11});
+
+    printf("the guest selects set 3 (F0 03) and reads it back (F0 00)\n");
+    put(0xF0); auto a1 = bytes();
+    put(0x03); auto a2 = bytes();
+    check("F0 03 is acknowledged twice", is(a1, {0xFA}) && is(a2, {0xFA}));
+    put(0xF0); bytes();
+    put(0x00); auto g = bytes();
+    check("F0 00 answers FA 03", is(g, {0xFA, 0x03}));
+    if (!is(g, {0xFA, 0x03})) show(g);
+
+    printf("set 3\n");
+    keycheck("Left Alt is 19 / F0 19", 0x11, false, {0x19}, {0xF0, 0x19});
+    keycheck("Left Ctrl is 11 / F0 11", 0x14, false, {0x11}, {0xF0, 0x11});
+    keycheck("Caps Lock is 14 / F0 14", 0x58, false, {0x14}, {0xF0, 0x14});
+    keycheck("Right Alt is 39, no E0", 0x11, true, {0x39}, {0xF0, 0x39});
+    keycheck("Right Ctrl is 58, no E0", 0x14, true, {0x58}, {0xF0, 0x58});
+    keycheck("Up is 63, no E0", 0x75, true, {0x63}, {0xF0, 0x63});
+    keycheck("Pause (hps_io E0 77) is 62", 0x77, true, {0x62}, {0xF0, 0x62});
+    keycheck("Num Lock (77) is 76", 0x77, false, {0x76}, {0xF0, 0x76});
+    keycheck("Esc is 08", 0x76, false, {0x08}, {0xF0, 0x08});
+    keycheck("F7 (83) is 37", 0x83, false, {0x37}, {0xF0, 0x37});
+    keycheck("A is 1C in both sets", 0x1C, false, {0x1C}, {0xF0, 0x1C});
+    keycheck("Left Win (E0 1F) is 8B", 0x1F, true, {0x8B}, {0xF0, 0x8B});
+    key(0x02, true); auto u = bytes(); key(0x02, false); auto u2 = bytes();
+    check("a key with no set-3 code is dropped", u.empty() && u2.empty());
+
+    printf("keyboard reset (FF) returns to set 2\n");
+    put(0xFF); auto r = bytes();
+    check("FF answers FA AA", is(r, {0xFA, 0xAA}));
+    keycheck("Left Alt is 11 again", 0x11, false, {0x11}, {0xF0, 0x11});
 
     printf("\nI8042: %s\n", failures ? "FAIL" : "PASS");
     delete t;

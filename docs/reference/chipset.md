@@ -178,7 +178,12 @@ protocol, because MiSTer's `hps_io` has already decoded the wire into
 `ps2_key` and `ps2_mouse`; re-serialising them only to decode them again would
 be work for its own sake. Command handling follows IRIS's `src/ps2.rs`, which
 drives this PROM and IRIX. Scan codes are set 2, which is what `ps2_key`
-delivers; set 1 translation is accepted as a config write and ignored.
+delivers, until the guest selects set 3 with `F0 03` - IRIX does - and then
+each key is translated to its set-3 code (no `E0` prefixes; a release is `F0`
+and the code), from a table pairing IRIS's set-2 and set-3 enums. Up to build
+51 the request was acknowledged and ignored, so under IRIX Left Alt acted as
+Ctrl and Left Ctrl as Caps Lock. Set 1 translation is accepted as a config
+write and ignored.
 
 It is decoded out of the IOC window in `sgi_indy.sv` rather than handled
 inside `sgi_ioc.sv`, for the same reason the SCC is: reading its data port
