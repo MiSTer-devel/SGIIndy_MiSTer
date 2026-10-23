@@ -8,7 +8,7 @@ draw"; nothing answered "is it still executing".
 
 WHAT IT MEASURES. The PROM's data and stack live around 0xa8740000, which is
 KSEG1 over SGI physical 0x08740000, and rtl/sgi/sgi_indy.sv's RAM_BASE makes
-that ARM physical 0x30740000. A MIPS core executing anything at all writes its
+that ARM physical 0x38740000 (0x30740000 up to build 50). A MIPS core executing anything at all writes its
 stack; a wedged one does not. So: two samples of that window a few seconds
 apart, and the count of bytes that moved.
 
@@ -20,7 +20,7 @@ import importlib.util, sys, time
 spec = importlib.util.spec_from_file_location("p", "/media/fat/sgidbg/ddr3_peek.py")
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 
-BASE = int(sys.argv[1], 0) if len(sys.argv) > 1 else 0x30740000
+BASE = int(sys.argv[1], 0) if len(sys.argv) > 1 else 0x38740000
 SPAN = int(sys.argv[2], 0) if len(sys.argv) > 2 else 0x10000
 GAP  = float(sys.argv[3]) if len(sys.argv) > 3 else 3.0
 

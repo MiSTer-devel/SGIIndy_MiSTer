@@ -47,6 +47,7 @@ module sgi_memmap #(
     // No parameters: the size is a runtime input. See bank_mb below.
     parameter int UNUSED_PARAM = 0
 )(
+    input  logic        clk,
     input  logic [31:0] memcfg0,      // banks 0 (high half) and 1 (low half)
     input  logic [31:0] memcfg1,      // banks 2 and 3
 
@@ -60,8 +61,9 @@ module sgi_memmap #(
     // line and the RTL has to agree with the memory actually behind it: a core
     // elaborated for 64 MB in front of a 32 MB host buffer advertises memory
     // that is not there, and the PROM's own memory test finds out - "Bank 0
-    // memory probe *FAILED* ... No usable memory found". On hardware this ties
-    // to a constant and folds away.
+    // memory probe *FAILED* ... No usable memory found". On hardware it is the
+    // OSD's Memory setting, latched at reset - not a constant, which is why
+    // the layout below is registered.
     //
     // BANKS COME IN 64, 16 AND 4 MB, largest first, and that list is not
     // arbitrary. A bank is four SIMMs, so it spans four times the SIMM size,
@@ -100,6 +102,26 @@ module sgi_memmap #(
         end
     end
 
+    // THE BANK LAYOUT IS REGISTERED, because it was the core clock's worst path
+    // (build 51). mem_mb is a static OSD setting - it only changes while the
+    // machine is held in reset - but the chain above (four 32-bit subtracts and
+    // compares) still sat between it and every RAM address: with 128 MB in the
+    // list, the fit's 300 worst endpoints all started at the Memory bit and
+    // ended in ddr3_mux's address and data registers, -0.9 to -2.7 ns over four
+    // seeds. Registered, the path into the offset adder below starts at these
+    // few flops, as MEMCFG's base field already does. One clock of latency
+    // after a change of size, inside a reset of 65,535 clocks.
+    logic        bank_on_q [4];   // the bank is fitted at this size
+    logic  [3:0] amask_q   [4];   // its size mask, bits 25:22
+    logic  [9:0] off_q     [4];   // its offset into this core's RAM, bits 31:22
+    always_ff @(posedge clk) begin
+        for (int i = 0; i < 4; i++) begin
+            bank_on_q[i] <= (bank_mb[i] != 32'd0);
+            amask_q[i]   <= ((bank_mb[i] << 20) - 32'd1) >> 22;
+            off_q[i]     <= bank_off[i][31:22];
+        end
+    end
+
     logic [15:0] half [4];
     assign half[0] = memcfg0[31:16];
     assign half[1] = memcfg0[15:0];
@@ -112,7 +134,6 @@ module sgi_memmap #(
     // construct that works everywhere except the one tool you need.
     logic        vld   [4];
     logic [31:0] base  [4];
-    logic [31:0] amask [4];
     logic        bhit  [4];
     logic  [9:0] off_hi [4];
 
@@ -127,12 +148,11 @@ module sgi_memmap #(
         // 2 MB units, which is the finest a limit comes in.
         wire [6:0] units = half[b][14] ? ({2'b00, half[b][12:8]} + 7'd1)
                                        : ({2'b00, half[b][12:8]} + 7'd1) << 1;
-        assign vld[b]   = half[b][13] && (bank_mb[b] != 32'd0);
+        assign vld[b]   = half[b][13] && bank_on_q[b];
         assign base[b]  = {2'b00, half[b][7:0], 22'b0};
-        // The installed SIMMs wrap within their own size, which is how the
-        // PROM's alias probe measures them: configure the bank larger than it
-        // is and the pattern written high reappears low.
-        assign amask[b] = (bank_mb[b] * 32'd1048576) - 32'd1;
+        // The installed SIMMs wrap within their own size (amask_q above), which
+        // is how the PROM's alias probe measures them: configure the bank larger
+        // than it is and the pattern written high reappears low.
         // ONLY addr[31:21] TAKES PART IN ANY ARITHMETIC (build 45b). A base is
         // 4 MB aligned and a limit a whole number of 2 MB, so `addr >= base`
         // is a compare of addr[31:22], `addr - base < limit` a subtract and a
@@ -143,10 +163,10 @@ module sgi_memmap #(
         assign bhit[b]  = vld[b] && (addr[31:22] >= base[b][31:22])
                                  && (d21 < {4'b0, units});
         // The offset the same way: bank_off and base have nothing below bit 22
-        // and amask nothing above bit 25, so bits 21:0 are addr's own and the
-        // rest is a four-bit subtract into a ten-bit add.
-        wire  [3:0] m4 = (addr[25:22] - base[b][25:22]) & amask[b][25:22];
-        assign off_hi[b] = bank_off[b][31:22] + {6'b0, m4};
+        // and the mask nothing above bit 25, so bits 21:0 are addr's own and
+        // the rest is a four-bit subtract into a ten-bit add.
+        wire  [3:0] m4 = (addr[25:22] - base[b][25:22]) & amask_q[b];
+        assign off_hi[b] = off_q[b] + {6'b0, m4};
     end
     endgenerate
 

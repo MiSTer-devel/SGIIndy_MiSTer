@@ -436,7 +436,7 @@ entirely ([note 16](../history.md#16)). `sgi_indy.sv` takes a `gfx_present`
 input so a serial-console test can ask for a machine without a graphics board,
 which is what the serial-console scripts in `tests/` do (`--no-gfx`);
 `run-newport.sh` and `run-rex3.sh` fit the board. On MiSTer the OSD's
-**Graphics board: None** is the same switch.
+**Display: Serial console** is the same switch.
 
 The MC's DMA engine reaches REX3 through this window too: IRIX aims every
 pixel DMA at REX3's `HOSTRW` register. Inside the window only REX3 answers a

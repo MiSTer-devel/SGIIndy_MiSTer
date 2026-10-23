@@ -7,24 +7,22 @@ the SCSI images, the keyboard, the mouse and the clock, the SCC on the board's
 UART, and VC2's raster to the scaler. This is how each of those is wired, and
 why.
 
-The current release is `releases/SGIIndy_20260928.rbf` (build 50, dated
-260928) with `releases/boot.rom`: IRIX 6.2 and 6.5 install - their n32
-processes run with Status.UX = 1 under a KX = 0 kernel, and a trap on the
-second instruction after an ERET no longer fetches its own exception vector as
-a user address ([irix6-user-mode.md](../design/irix6-user-mode.md)) - on top
-of build 49c's IRIX menus (the popup planes come with the drawing planes, and
-the display gets more DDR3 reads in flight while an overlay is up or a line
-cache runs low; [popup-planes-display-fetch.md](../design/popup-planes-display-fetch.md)).
+The current release is `releases/SGIIndy_20261023.rbf` (build 51, dated
+261023) with `releases/boot.rom`: the computer-core OSD standard (pages,
+settings latched at reset, *Changes pending*, Swap Alt/Win keys), up to 128 MB
+of memory, OSD resets that no longer fail POST's keyboard-controller test, and
+the keyboard in scan-code set 3 when IRIX asks for it (Ctrl, Alt and Caps Lock
+right under IRIX), on top of build 50's IRIX 6.2/6.5 install and IRIX menus.
 It was built with Quartus Prime Lite 17.0.2 **on the Linux build machine
-(m900)** at fitter seed 5, the seed `sgiindy.qsf` keeps: 37,174 of 41,910
-ALMs (89 %), 491 of 553 M10K blocks, 63 of 112 DSP blocks, and timing met in
-every check - worst setup slack +0.654 ns on the 50 MHz core clock and
-+0.066 ns on the HDMI pixel clock. `SEED=5 BUILD_DATE=260928 bash scripts/build.sh` on that machine
+(m900)** at fitter seed 2, the seed `sgiindy.qsf` keeps: 36,827 of 41,910
+ALMs (88 %), 492 of 553 M10K blocks, 57 of 112 DSP blocks, and timing met in
+every check - worst setup slack +1.222 ns on the 50 MHz core clock and
++0.282 ns on the HDMI pixel clock. `SEED=2 BUILD_DATE=261023 bash scripts/build.sh` on that machine
 rebuilds it; Quartus on Windows places the same inputs differently, so a
 bitstream is only bit-identical on the machine that built it. The earlier
-releases, `SGIIndy_20260927.rbf` (build 48, seed 5, m900) and
-`SGIIndy_20260918.rbf` (build 44, seed 1, built on Windows), stay in
-`releases/` beside it. `scripts/build.sh` writes that report into `reports/` after every
+releases, `SGIIndy_20260928.rbf` (build 50, seed 5, m900),
+`SGIIndy_20260927.rbf` (build 48, seed 5, m900) and `SGIIndy_20260918.rbf`
+(build 44, seed 1, built on Windows), stay in `releases/` beside it. `scripts/build.sh` writes that report into `reports/` after every
 compile; [deploy-and-debug.md](deploy-and-debug.md#building) has the flow.
 
 ## The map
@@ -48,7 +46,7 @@ compile; [deploy-and-debug.md](deploy-and-debug.md#building) has the flow.
 
 ## Memory: everything is in DDR3
 
-The machine has up to 64 MB of main memory and Newport 16 MB of frame buffer,
+The machine has up to 128 MB of main memory and Newport 16 MB of frame buffer,
 against about 690 KB of block RAM on the Cyclone V (5,662,720 bits), two
 thirds of which build 44 already uses for caches, line buffers and register
 files. There is no choice about where memory lives.
@@ -58,16 +56,19 @@ selected by `DDRAM_ADDR[28:25] = 4'b0011` — ARM physical `0x30000000` up — a
 
 | region | window offset | ARM physical | size |
 |---|---|---|---|
-| main memory (guest physical `0x08000000` up) | `0x0000_0000` | `0x30000000` | 64 MB |
 | frame buffer, drawing planes | `0x0400_0000` | `0x34000000` | 8 MB |
 | frame buffer, auxiliary planes | `0x0480_0000` | `0x34800000` | 8 MB |
 | PROM image (guest physical `0x1FC00000`) | `0x0500_0000` | `0x35000000` | 512 KB |
-| debug beacon (see below) | `0x0580_0000` | `0x35800000` | 43 × 8 bytes |
+| debug beacon (see below) | `0x0580_0000` | `0x35800000` | 49 × 8 bytes |
+| main memory (guest physical `0x08000000` up) | `0x0800_0000` | `0x38000000` | 128 MB |
 
 The main memory region is sized for the largest size the OSD offers rather
 than for the selection. A map that moved with the menu would put the frame
 buffer at a different address for every entry, which the guest never sees and
-every debugging session would.
+every debugging session would. It is the top half of the window and contiguous:
+up to build 50 it was 64 MB at offset 0, and a second 64 MB anywhere else
+would have been reached by ram_arb's 12-word prefetching fill running off the
+end of the first. At `0x0800_0000` the base is one constant address bit.
 
 **`DDRAM_ADDR` counts 64-bit words, not bytes.** Getting that wrong is an
 eight-times address error, which does not present as an address error: it
@@ -324,27 +325,42 @@ scaler hides the difference.
 
 ### The OSD
 
-| entry | `CONF_STR` | what it does |
-|---|---|---|
-| Load PROM | `FS0,BIN` | loads an SGI PROM image by hand at ioctl index 0, the same index the automatic `boot.rom` uses; the core is held in reset until the download finishes |
-| SCSI ID1, SCSI ID2 | `SC1`, `SC2` | disk images on SCSI IDs 1 and 2 |
-| SCSI ID6 CD | `SC3` | a CD-ROM image on ID 6 |
-| Graphics board: Fitted / None | `O[10]` | whether Newport answers on the bus. **Fitting it moves the console off the serial port**: ARCS installs a DisplayController with `ConsoleOut\|Output` and the PROM stops printing to the SCC, so *None* is a real machine configuration, not a degraded mode |
-| Primary caches: On / Off | `O[11]` | both primary caches, for bisecting a fault onto them without a rebuild |
-| Memory: 48MB / 32MB / 64MB | `O[13:12]` | main memory size; 48 MB is the default. Changing it resets the machine |
-| Video debug: Off / Raw index | `O[14]` | shows the frame buffer's colour index as grey with CMAP taken out of the path (the cursor as white), and a line-cache miss as index `0x80` |
-| UART debug: Off / 0x55 from clk_sys / 0x55 from sclk | `O[16:15]` | replaces the SCC on `UART_TXD` with an endless 9600-baud `0x55` from either clock domain, to separate the SCC from the path to the HPS |
-| SCSI cache: On / Off | `O[17]` | the SCSI block cache (`rtl/scsi/scsi_cache.sv`, [scsi-block-cache.md](../design/scsi-block-cache.md)); Off makes every block request a single-sector HPS transaction |
-| Aspect ratio | `O[122:121]` | Original (5:4), Full Screen, and the two custom ratios |
-| Reset / Reset and close OSD | `T[0]` / `R[0]` | resets the machine |
+The layout is the computer-core [OSD standard](https://github.com/danifunker/hp9000-715_MiSTer/blob/master/docs/osd-standard.md)
+(since build 51): media and Memory on the top page, P1 Machine, P2 Video,
+P3 Input, P4 Audio, P5 Advanced, and P9 Debug only when `SGIINDY_DEBUG` is
+defined. `sgiindy.sv` latches `status` into `cfg` for the whole of every reset
+and every setting reads `cfg`, so a changed row does nothing until **Apply and
+reset** (`R[0]`) or any other reset; `status_menumask` bit 0 is "settings
+differ from `cfg`" and shows the *Changes pending* row (`h0-`). Only the media
+and the Input page act at once. The status bits are the ones they always were;
+the config version is 1 (`v,1;`) because the Memory list changed order, so Main
+keeps the settings in `SGIINDY_v1.CFG`.
 
-`scripts/setopt.sh` writes the same bits into `/media/fat/config/SGIINDY.CFG`
-without touching the OSD, because the screenshot API does not capture the OSD
-and a blind keystroke walk through it cannot be checked.
+| page | entry | `CONF_STR` | what it does |
+|---|---|---|---|
+| top | Pri. disk (ID 1), Disk (ID 2) | `SC1`, `SC2` | disk images on SCSI IDs 1 and 2 |
+| top | CD-ROM (ID 6) | `SC3` | a CD-ROM image on ID 6 |
+| top | Load ROM | `F0,ROMBIN` | an SGI PROM image at ioctl index 0, the same index the automatic `boot.rom` uses, for that session only; the core is held in reset until the download finishes |
+| top | Memory: 32MB / 48MB / 64MB / 128MB | `O[13:12]` | main memory size; 32 MB is the default (the standard's "smallest that runs the usual OS") |
+| P1 | Primary caches: On / Off | `O[11]` | both primary caches, for bisecting a fault onto them without a rebuild |
+| P2 | Display: Graphics / Serial console | `O[10]` | whether Newport answers on the bus. **Fitting it moves the console off the serial port**: ARCS installs a DisplayController with `ConsoleOut\|Output` and the PROM stops printing to the SCC, so *Serial console* is a real machine configuration, not a degraded mode |
+| P2 | Aspect ratio | `O[122:121]` | Original (5:4), Full Screen, and the two custom ratios |
+| P3 | Swap Alt/Win keys: No / Yes | `O[23]` | swaps set 2's left Alt (`11`) with left Win (`E0 1F`) and right Alt (`E0 11`) with right Win (`E0 27`) on the way into the i8042, which translates to set 3 when the guest asks for it (IRIX does); acts at once |
+| P4 | Audio: On / Off | `O[18]` | Off makes HAL2 report itself absent |
+| P5 | SCSI cache: On / Off | `O[17]` | the SCSI block cache (`rtl/scsi/scsi_cache.sv`, [scsi-block-cache.md](../design/scsi-block-cache.md)); Off makes every block request a single-sector HPS transaction |
+| P9 | Video debug: Off / Raw index | `O[14]` | shows the frame buffer's colour index as grey with CMAP taken out of the path (the cursor as white), and a line-cache miss as index `0x80` |
+| P9 | UART debug: Off / 0x55 clk_sys / 0x55 sclk | `O[16:15]` | replaces the SCC on `UART_TXD` with an endless 9600-baud `0x55` from either clock domain, to separate the SCC from the path to the HPS |
+| P9 | DATA IN look-ahead, DATA IN guard, I-fetch prefetch, D-fetch prefetch | `O[19]`..`O[22]` | the A/B switches `setopt.sh` calls `lookahead`, `dinstrict`, `ipf`, `dpf` |
+
+The logic behind the P9 rows is in every build; only the rows are debug-only,
+so `scripts/setopt.sh` can still set those bits on a release bitstream. It
+writes the bits into `/media/fat/config/SGIINDY_v1.CFG` without touching the
+OSD, because the screenshot API does not capture the OSD and a blind keystroke
+walk through it cannot be checked.
 
 ### Downloads: the PROM and the Ethernet address
 
-**Index 0 is the PROM, both ways in.** The OSD entry is `FS0`, and MiSTer's
+**Index 0 is the PROM, both ways in.** The OSD entry is `F0`, and MiSTer's
 Main uploads a file named `boot.rom` from the core's games directory at every
 core start, at index 0, with no CONF_STR entry needed. One decode serves both.
 The decode compares the **whole low byte** of `ioctl_index`, not just the slot
@@ -528,7 +544,7 @@ The comment above the writer in `sgiindy.sv` is the authoritative bit map.
 ## Installing a release
 
 ```
-/media/fat/_Computer/SGIIndy_20260928.rbf   the core, in any "_" folder
+/media/fat/_Computer/SGIIndy_20261023.rbf   the core, in any "_" folder
 /media/fat/games/SGIIndy/boot.rom           the PROM: releases/boot.rom
 ```
 

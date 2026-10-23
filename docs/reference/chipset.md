@@ -178,7 +178,12 @@ protocol, because MiSTer's `hps_io` has already decoded the wire into
 `ps2_key` and `ps2_mouse`; re-serialising them only to decode them again would
 be work for its own sake. Command handling follows IRIS's `src/ps2.rs`, which
 drives this PROM and IRIX. Scan codes are set 2, which is what `ps2_key`
-delivers; set 1 translation is accepted as a config write and ignored.
+delivers, until the guest selects set 3 with `F0 03` - IRIX does - and then
+each key is translated to its set-3 code (no `E0` prefixes; a release is `F0`
+and the code), from a table pairing IRIS's set-2 and set-3 enums. Up to build
+51 the request was acknowledged and ignored, so under IRIX Left Alt acted as
+Ctrl and Left Ctrl as Caps Lock. Set 1 translation is accepted as a config
+write and ignored.
 
 It is decoded out of the IOC window in `sgi_indy.sv` rather than handled
 inside `sgi_ioc.sv`, for the same reason the SCC is: reading its data port
@@ -276,8 +281,8 @@ and a block cache between the targets and the SD card.
   answers reads from block RAM, prefetches, and moves up to eight sectors per
   HPS transaction; the OSD's **SCSI cache: Off** bypasses it
   ([scsi-block-cache.md](../design/scsi-block-cache.md)).
-- On MiSTer the OSD's three image slots are **SCSI ID1**, **SCSI ID2** and
-  **SCSI ID6 CD**; in simulation `--disk ID=PATH` attaches an image.
+- On MiSTer the OSD's three image slots are **Pri. disk (ID 1)**, **Disk (ID 2)**
+  and **CD-ROM (ID 6)**; in simulation `--disk ID=PATH` attaches an image.
 
 POST's data path test and SCSI controller diagnostic both pass, the PROM boots
 from the disk, IRIX runs from it and installs onto it from the CD. What the

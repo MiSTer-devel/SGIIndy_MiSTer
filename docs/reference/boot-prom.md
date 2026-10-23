@@ -19,7 +19,7 @@ The two files are the same image. At the Command Monitor, `version` prints
 
 It is SGI firmware and not part of the bitstream. MiSTer's framework loads
 `boot.rom` from the core's games directory (`games/SGIIndy/`) at every core
-start, over `ioctl` index 0; the OSD's **Load PROM** does the same by hand.
+start, over `ioctl` index 0; the OSD's **Load ROM** does the same by hand.
 Either way `sgiindy.sv` writes it into DDR3 and holds the machine in reset
 until the download has finished and for 65,535 clocks after.
 `scripts/deploy.sh` copies `releases/boot.rom` to the card.

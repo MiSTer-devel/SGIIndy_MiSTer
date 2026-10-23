@@ -18,7 +18,9 @@
 # and doubling RTC_TICK_DIV each leave it at 16, which rules out both
 # timebases; the loop lives at 0xBFC3159C, in uncached KSEG1, so the
 # instruction cache does not move it either. See docs/reference/cpu.md,
-# "What it did not buy". The part that matters is "R4400, with FPU".
+# "What it did not buy". The part that matters is "R4600, with FPU" - the
+# identity since the Killer Instinct CPU (build 25); this line said R4400 until
+# build 51 and failed unnoticed in between.
 #
 # The run ends on "Mbytes" rather than on "Memory size:", which is the last
 # thing hinv prints: --stop-on fires on the cycle the substring completes, so
@@ -42,7 +44,7 @@ EXPECT=(
     "5) Enter Command Monitor"
     "Command Monitor."                     # and the menu took a keystroke: serial input
     "PROM Monitor SGI Version 5.3"         # the >> prompt runs commands
-    "Processor: 16 Mhz R4400, with FPU"    # the R4400 presentation, end to end
+    "Processor: 16 Mhz R4600, with FPU"    # the R4600 presentation, end to end
     "Primary I-cache size: 16 Kbytes"
     "Memory size: 64 Mbytes"               # and MEMCFG sized the SIMMs right
 )

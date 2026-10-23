@@ -197,7 +197,7 @@ launch starts. Every launch that is meant to measure something resets both:
   still shows index `0xE7` was not drawn by this boot.
 - **Main memory**, because the measurements read state out of it — IRIX's
   `panicstr`, the CPU test suite's log — and the previous run's copy must not
-  be read as this one's. `memclear.py` zeroes `0x30000000`–`0x34000000`. It
+  be read as this one's. `memclear.py` zeroes `0x38000000`–`0x40000000`. It
   was written when the MC's DMA engine was a stub and the PROM's own memory
   clear moved nothing, so a machine booted on the last run's leftovers; the
   engine fills memory now (`rtl/sgi/mc_gio_dma.sv`), and the scripts still
@@ -311,7 +311,7 @@ bash scripts/console.sh [--baud N] [--seconds N] [--out FILE]
 `tty1` is `/dev/ttyS1` on the ARM. `console.sh` runs `uartmode 0` first —
 MiSTer parks `pppd`, `agetty` or `midilink` on that tty depending on the OSD's
 UART setting, and two readers on one tty each get half the bytes — sets the
-rate and reads. With **Graphics board: None** the PROM prints its console there
+rate and reads. With **Display: Serial console** the PROM prints its console there
 at 9600 baud and then announces `diagnostic baud rate set to 19200`, so a
 capture pinned to one rate gets one part or the other.
 

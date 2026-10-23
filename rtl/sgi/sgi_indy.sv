@@ -541,6 +541,7 @@ module sgi_indy #(
                      || ((bus_addr >= HIMEM_BASE) && (bus_addr < HIMEM_END));
 
     sgi_memmap u_memmap (
+        .clk     (clk),
         .mem_mb (mem_mb),
         .memcfg0 (mc_memcfg0),
         .memcfg1 (mc_memcfg1),
@@ -647,6 +648,7 @@ module sgi_indy #(
     logic [31:0] dma_off;
 
     sgi_memmap u_memmap_dma (
+        .clk     (clk),
         .mem_mb (mem_mb),
         .memcfg0 (mc_memcfg0),
         .memcfg1 (mc_memcfg1),

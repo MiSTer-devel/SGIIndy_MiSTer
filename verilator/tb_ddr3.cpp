@@ -153,8 +153,8 @@ static void tick()
                        b.addr, n, (unsigned long long)(mem.count(b.addr) ? mem[b.addr] : 0));
             if (getenv("DDR3_DEBUG"))
                 printf("      [bridge] read addr=%08x burst=%d\n", b.addr, n);
-            // A main-memory word address: region offset below 64 MB.
-            bool ram = ((b.addr & 0x1FFFFFFu) < 0x0800000u);
+            // A main-memory word address: region offset 0x08000000 and up.
+            bool ram = ((b.addr & 0x1FFFFFFu) >= 0x1000000u);
             if (ram) { x_n_ram++; x_ahead += read_pipe.size(); }
             x_clean_q.push_back(read_pipe.empty());
             for (int w = 0; w < n; w++)
@@ -234,7 +234,7 @@ int main(int argc, char **argv)
     printf("running %d cycles of four-master traffic ...\n", ROUNDS);
 
     auto region_size = [](Master *m) -> uint32_t {
-        if (m == &m_ram)  return 64u * 1024 * 1024;    // the OSD's largest
+        if (m == &m_ram)  return 128u * 1024 * 1024;   // the OSD's largest
         if (m == &m_prom) return 512u * 1024;
         return 8u * 1024 * 1024;               // frame buffer, a slice of it
     };
@@ -395,6 +395,33 @@ int main(int argc, char **argv)
             m_fbw.busy = false; m_fbw.acked++;
             if (m_fbw.wait_cycles > m_fbw.worst_wait) m_fbw.worst_wait = m_fbw.wait_cycles;
         }
+    }
+
+    // ---- where the regions landed ----------------------------------------
+    // Everything above checks that each master reads back its own writes, and a
+    // wrong base passes that as long as no two regions collide. This checks the
+    // placement itself, in the bridge's own store: main memory at window offset
+    // 0x08000000 (ARM 0x38000000, all 128 MB contiguous, so a 12-word fill that
+    // runs past a line can never leave RAM for the frame buffer), the frame
+    // buffer at 0x04000000.
+    {
+        dut->fbw_req = 0; dut->ram_req = 0; dut->prom_req = 0; dut->fbr_req = 0;
+        for (int i = 0; i < 512; i++) tick();
+        auto placed = [&](const char *what, uint32_t base,
+                          const std::map<uint32_t, uint64_t> &sh) {
+            uint64_t n = 0, bad = 0;
+            for (auto &kv : sh) {
+                uint32_t w = (3u << 25) | ((base + kv.first) >> 3);
+                uint64_t got = mem.count(w) ? mem[w] : 0;
+                n++;
+                if (got != kv.second) { bad++; fail(what, kv.first, kv.second, got); }
+            }
+            printf("  %s: %llu words checked at window %08x, %llu misplaced\n", what,
+                   (unsigned long long)n, base, (unsigned long long)bad);
+        };
+        printf("\nplacement in the bridge's store ...\n");
+        placed("ram placement", 0x08000000u, m_ram.shadow);
+        placed("fb placement",  0x04000000u, fb_shadow);
     }
 
     // ---- phase 3: a HOLDING master that alternates read and write ---------

@@ -40,9 +40,9 @@ Put both files in `/media/fat/games/SGIIndy/`, next to `boot.rom`.
 
 | OSD slot | SCSI ID | what goes there | IRIX name |
 |---|---|---|---|
-| **SCSI ID1** | 1 | the system disk - IRIX installs onto it and boots from it | `dks0d1` |
-| **SCSI ID2** | 2 | an optional second disk | `dks0d2` |
-| **SCSI ID6 CD** | 6 | the CD-ROM drive | `dks0d6` |
+| **Pri. disk (ID 1)** | 1 | the system disk - IRIX installs onto it and boots from it | `dks0d1` |
+| **Disk (ID 2)** | 2 | an optional second disk | `dks0d2` |
+| **CD-ROM (ID 6)** | 6 | the CD-ROM drive | `dks0d6` |
 
 In the PROM's own notation the same devices are `dksc(0,1,N)` and
 `dksc(0,6,N)`, where N is the partition: 8 is a disk's volume header, 7 the
@@ -64,11 +64,11 @@ always starts with (it does not keep the PROM's settings across a reload), so
    ```
 
    (With no disk mounted at all you only get the last line.)
-2. Open the OSD (F12) and choose **SCSI ID1** -> your empty `irix53.img`, and
-   **SCSI ID6 CD** -> the IRIX ISO. The slots are remembered from then on.
-3. Choose **Memory: 64MB** while you are there - the most the core offers,
-   and what this procedure was tested with.
-4. **Reset** (from the OSD) so the machine starts with both images present,
+2. Open the OSD (F12) and choose **Pri. disk (ID 1)** -> your empty `irix53.img`,
+   and **CD-ROM (ID 6)** -> the IRIX ISO. The slots are remembered from then on.
+3. Choose **Memory: 64MB** (or 128MB) while you are there - this procedure
+   was tested with 64.
+4. **Apply and reset** (from the OSD) so the machine starts with both images present,
    and press a key at the message above. You get the **System Maintenance
    Menu**: *Start System*, *Install System Software*, *Run Diagnostics*,
    *Recover System*, *Enter Command Monitor*, *Select Keyboard Layout*.
@@ -177,7 +177,7 @@ first boot of a CD-installed system has not yet been watched on the core.
 ## Using an existing installation instead
 
 Any raw image of an Indy system disk with IRIX 5.3 on it works: mount it at
-**SCSI ID1** and start the core. That includes a disk installed under an
+**Pri. disk (ID 1)** and start the core. That includes a disk installed under an
 emulator (MAME's `indy_4610`, or IRIS) - convert a MAME hard-disk `.chd` to a
 raw image first with
 

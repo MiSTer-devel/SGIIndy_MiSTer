@@ -13,16 +13,18 @@ and is not a substitute - it is silently wrong rather than loudly broken.
 
 ADDRESSES ARE ARM PHYSICAL. rtl/mister/ddr3_mux.sv puts REGION at
 DDRAM_ADDR[28:25] = 4'b0011 and DDRAM_ADDR counts 64-BIT WORDS, so the window
-starts at byte 0x30000000 and the three regions inside it are:
+starts at byte 0x30000000 and the regions inside it are:
 
-    0x30000000  main memory  (64 MB, sized for the largest OSD selection)
     0x34000000  frame buffer (16 MB)
     0x35000000  boot PROM    (512 KB)
+    0x35800000  debug beacon (sgiindy.sv)
+    0x38000000  main memory  (128 MB, sized for the largest OSD selection;
+                              0x30000000 and 64 MB up to build 50)
 
 Usage (on the MiSTer):
     ddr3_peek.py 0x35000000 0x40            # hex dump 64 bytes
     ddr3_peek.py 0x34000000 0x100000 -o fb  # write a megabyte to a file
-    ddr3_peek.py 0x30000000 0x1000 --stats  # nonzero byte count only
+    ddr3_peek.py 0x38000000 0x1000 --stats  # nonzero byte count only
 """
 import argparse
 import mmap

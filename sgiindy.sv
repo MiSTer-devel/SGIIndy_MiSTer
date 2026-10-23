@@ -15,13 +15,13 @@
 //
 //  THE FOUR THINGS WORTH KNOWING BEFORE READING THE CODE:
 //
-//  1. EVERYTHING IS IN DDR3. Up to 64 MB of Indy memory and 16 MB of Newport
+//  1. EVERYTHING IS IN DDR3. Up to 128 MB of Indy memory and 16 MB of Newport
 //     frame buffer, against 688 KB of M10K that the CPU's caches and the
 //     graphics already use most of. ddr3_mux.sv carves the 256 MB window
 //     MiSTer gives a core. The SDRAM pins are not used.
 //  2. THE PROM COMES OFF THE SD CARD. It is SGI firmware; it is not in the
 //     bitstream. The framework loads `boot.rom` out of the core's directory
-//     by itself at startup; the OSD's "Load PROM" does the same job by hand.
+//     by itself at startup; the OSD's "Load ROM" does the same job by hand.
 //     Either way ioctl writes it into DDR3 and the core is held in reset
 //     until the download finishes.
 //  3. THE VIDEO IS CORRECT AND THE REFRESH IS LOW. VC2 runs the timing table
@@ -31,7 +31,7 @@
 //     clock, so a table written for 107.5 MHz comes out at 50 and the frame
 //     rate is about 28 Hz; the MiSTer scaler converts it to the HDMI mode.
 //     60 Hz needs a second clock domain, not a faster core.
-//  4. WITH NO GRAPHICS BOARD THE CONSOLE IS SERIAL. OSD "Graphics board: None"
+//  4. WITH NO GRAPHICS BOARD THE CONSOLE IS SERIAL. OSD "Display: Serial console"
 //     makes the PROM and IRIX use the SCC's serial port, which is wired to the
 //     MiSTer's UART pins.
 //============================================================================
@@ -72,17 +72,25 @@ assign BUTTONS = 0;
 
 //////////////////////////////////////////////////////////////////
 
-// 1280x1024 is 5:4. The Indy's own monitor was 5:4 and the PROM's boot screen
-// is drawn for it, so that is what "Original" means here.
-wire [1:0] ar = status[122:121];
-assign VIDEO_ARX = (!ar) ? 12'd5 : (ar - 1'd1);
-assign VIDEO_ARY = (!ar) ? 12'd4 : 12'd0;
-
 `include "build_id.v"
+// THE MENU FOLLOWS THE COMPUTER-CORE OSD STANDARD (danifunker/hp9000-715_MiSTer,
+// docs/osd-standard.md): media, Memory, then the submenus at fixed page numbers
+// - P1 Machine, P2 Video, P3 Input, P4 Audio, P5 Advanced, P9 Debug - and
+// "Apply and reset". Every setting is latched into `cfg` at reset (below); only
+// the media and the Input page act at once.
+//
+// THE STATUS BITS DID NOT MOVE when the rows did, so scripts/setopt.sh still
+// names the same bits. The Memory list did change order (32 MB first, as the
+// standard asks: the smallest size that runs the usual OS), so the config
+// version is 1 and Main keeps the settings in SGIINDY_v1.CFG, dropping the old
+// SGIINDY.CFG instead of reading 48 MB as 32.
+//
+// P9 EXISTS ONLY IN A DEBUG BUILD (`define SGIINDY_DEBUG, e.g. a
+// VERILOG_MACRO assignment in the .qsf). Its rows are the bring-up instruments;
+// the logic behind them stays in every build, so setopt.sh can still use them
+// on a release bitstream.
 localparam CONF_STR = {
 	"SGIIndy;;",
-	"-;",
-	"FS0,BIN,Load PROM;",
 	"-;",
 	// `SC` RATHER THAN `S`, AND THE C IS THE WHOLE POINT: it makes the mount
 	// SURVIVE A CORE RELOAD. The framework parses this string on the ARM side;
@@ -102,13 +110,50 @@ localparam CONF_STR = {
 	// does not capture the OSD and a blind menu walk cannot be verified. The
 	// format is not a text file: FileSaveConfig writes the whole of menu.cpp's
 	// `char selPath[1024]`, so the path goes in NUL-terminated and zero-padded.
-	"SC1,IMGISOCHD,SCSI ID1;",
-	"SC2,IMGISOCHD,SCSI ID2;",
-	"SC3,IMGISOCHD,SCSI ID6 CD;",
+	//
+	// The PROM boots from SCSI ID 1 by default, so that slot is the `Pri.` one.
+	"SC1,IMGISOCHD,Pri. disk (ID 1);",
+	"SC2,IMGISOCHD,Disk (ID 2);",
+	"SC3,IMGISOCHD,CD-ROM (ID 6);",
+	// Index 0, NOT remembered (`F`, not `FC`): every start loads boot.rom, and
+	// this picks another PROM for one session only. See PROM DOWNLOAD below.
+	"F0,ROMBIN,Load ROM;",
 	"-;",
-	"O[10],Graphics board,Fitted,None;",
-	"O[11],Primary caches,On,Off;",
-	"O[13:12],Memory,48MB,32MB,64MB;",
+	"O[13:12],Memory,32MB,48MB,64MB,128MB;",
+	"-;",
+	"P1,Machine;",
+	"P2,Video;",
+	"P3,Input;",
+	"P4,Audio;",
+	"P5,Advanced;",
+`ifdef SGIINDY_DEBUG
+	"P9,Debug;",
+`endif
+	"-;",
+	"h0-,Changes pending;",
+	"R[0],Apply and reset;",
+
+	"P1O[11],Primary caches,On,Off;",
+
+	// FITTING THE GRAPHICS BOARD MOVES THE CONSOLE OFF THE SERIAL PORT (see
+	// gfx_present below), so this is the standard's "display source".
+	"P2O[10],Display,Graphics,Serial console;",
+	"P2O[122:121],Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
+
+	"P3O[23],Swap Alt/Win keys,No,Yes;",
+
+	// THE AUDIO SWITCH (rtl/sgi/hal2.sv). Off makes HAL2 report itself absent,
+	// so the PROM plays no tune and IRIX never loads its audio driver - the
+	// machine as it was before there was a sample path.
+	"P4O[18],Audio,On,Off;",
+
+	// THE SCSI BLOCK CACHE (docs/design/scsi-block-cache.md; rtl/scsi/scsi_cache.sv). Off makes every
+	// block request a single-sector HPS transaction again, as before build
+	// 26 - the control for measuring the cache on one bitstream, and the
+	// way out if it ever misbehaves. scripts/setopt.sh knows it as scsicache.
+	"P5O[17],SCSI cache,On,Off;",
+
+`ifdef SGIINDY_DEBUG
 	// A BRING-UP INSTRUMENT, NOT A FEATURE. The first hardware run drew a
 	// perfect 1318x1024 raster and a black screen, and black has two causes
 	// that look the same from outside: the frame buffer read returning
@@ -116,7 +161,7 @@ localparam CONF_STR = {
 	// frame buffer's own colour index as grey with CMAP taken out of the path,
 	// and serves index 0x80 for a line-cache miss instead of black - so the
 	// three cases finally look different from each other.
-	"O[14],Video debug,Off,Raw index;",
+	"P9O[14],Video debug,Off,Raw index;",
 	// THE OTHER BRING-UP INSTRUMENT. With the graphics board unfitted the
 	// machine demonstrably runs - main memory carries szmem's walking-bit
 	// patterns - and the ARM's /dev/ttyS1 has counted rx:0 bytes, ever. So the
@@ -124,23 +169,14 @@ localparam CONF_STR = {
 	// from outside: the SCC not transmitting, or nothing between UART_TXD and
 	// the HPS UART working at all. This puts a transmitter of the core's own
 	// on the pin, in one clock domain or the other.
-	"O[16:15],UART debug,Off,0x55 from clk_sys,0x55 from sclk;",
-	// THE SCSI BLOCK CACHE (docs/design/scsi-block-cache.md; rtl/scsi/scsi_cache.sv). Off makes every
-	// block request a single-sector HPS transaction again, as before build
-	// 26 - the control for measuring the cache on one bitstream, and the
-	// way out if it ever misbehaves. scripts/setopt.sh knows it as scsicache.
-	"O[17],SCSI cache,On,Off;",
-	// THE AUDIO SWITCH (rtl/sgi/hal2.sv). Off makes HAL2 report itself absent,
-	// so the PROM plays no tune and IRIX never loads its audio driver - the
-	// machine as it was before there was a sample path. Takes effect at the
-	// next reset.
-	"O[18],Audio,On,Off;",
-	"-;",
-	"O[122:121],Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
-	"-;",
-	"T[0],Reset;",
-	"R[0],Reset and close OSD;",
-	"v,0;",
+	"P9O[16:15],UART debug,Off,0x55 clk_sys,0x55 sclk;",
+	// The A/B switches setopt.sh calls lookahead, dinstrict, ipf and dpf.
+	"P9O[19],DATA IN look-ahead,On,Off;",
+	"P9O[20],DATA IN guard,On,Off;",
+	"P9O[21],I-fetch prefetch,On,Off;",
+	"P9O[22],D-fetch prefetch,On,Off;",
+`endif
+	"v,1;",
 	"V,v",`BUILD_DATE
 };
 
@@ -159,6 +195,26 @@ wire [127:0] status;
 wire [10:0] ps2_key;
 wire [24:0] ps2_mouse;
 wire [64:0] host_rtc;
+
+// THE SETTINGS THE MACHINE RUNS WITH, taken from the OSD at every reset (Apply
+// and reset, the board's reset button, a core reload, a PROM download) - see
+// RESET below for the latch. Everything that is a setting reads `cfg`, never
+// `status`, so a row changed in the OSD does nothing until the reset. Before
+// this, Primary caches switched under a running guest, and Memory reset the
+// machine the moment the row changed.
+reg [127:0] cfg;
+
+// "Changes pending": an OSD value differs from the running one. Every setting
+// field, and nothing else: not bit 0 (reset), not the Input page (bit 23 acts
+// at once and is never pending).
+wire osd_pending = {status[22:10], status[122:121]}
+                != {cfg[22:10],    cfg[122:121]};
+
+// 1280x1024 is 5:4. The Indy's own monitor was 5:4 and the PROM's boot screen
+// is drawn for it, so that is what "Original" means here.
+wire [1:0] ar = cfg[122:121];
+assign VIDEO_ARX = (!ar) ? 12'd5 : (ar - 1'd1);
+assign VIDEO_ARY = (!ar) ? 12'd4 : 12'd0;
 
 wire        ioctl_download;
 wire [15:0] ioctl_index;
@@ -222,7 +278,8 @@ hps_io #(.CONF_STR(CONF_STR), .WIDE(1), .VDNUM(VDNUM)) hps_io
 	.forced_scandoubler(forced_scandoubler),
 	.buttons(buttons),
 	.status(status),
-	.status_menumask(0),
+	// bit 0: "h0-,Changes pending;"
+	.status_menumask({15'd0, osd_pending}),
 
 	.ps2_key(ps2_key),
 	.ps2_mouse(ps2_mouse),
@@ -292,17 +349,18 @@ end
 // bank that could not answer and its own diagnostic said so. All three boot in
 // simulation and the PROM reports each one back.
 //
-// 48 MB IS FIRST, SO IT IS THE DEFAULT. It is the size sgi_memmap.sv calls
-// "the MiSTer single-SDRAM fit" - three 16 MB banks - and it is a real Indy
-// configuration rather than a compromise. 64 is the ceiling: this is a single
-// RAM configuration. The MC can express 96 and 128 across more banks and
-// sgi_memmap.sv will build them, but they are not offered, because a size the
-// board cannot be is not a choice - it is a way to get "No usable memory
-// found" out of a machine that looked fine in the menu.
-wire [1:0] mem_sel = status[13:12];
-wire [31:0] mem_mb = (mem_sel == 2'd1) ? 32'd32
+// 128 MB IS 64 + 64, two banks of 16Mx36 SIMMs, and it is the largest size
+// that needs no two-subbank SIMMs (sgi_memmap.sv does not model them; a real
+// Indy reaches 256 MB only with those). ddr3_mux.sv puts the upper 64 MB
+// above the frame buffer and the PROM, so neither moved.
+//
+// 32 MB IS FIRST, SO IT IS THE DEFAULT: the OSD standard lists the smallest
+// size that runs the usual OS first. IRIX 5.3 runs in 32; IRIX 6.5 wants more.
+wire [1:0] mem_sel = cfg[13:12];
+wire [31:0] mem_mb = (mem_sel == 2'd1) ? 32'd48
                    : (mem_sel == 2'd2) ? 32'd64
-                   :                     32'd48;
+                   : (mem_sel == 2'd3) ? 32'd128
+                   :                     32'd32;
 
 //////////////////////////   RESET   /////////////////////////////
 
@@ -313,7 +371,7 @@ wire [31:0] mem_mb = (mem_sel == 2'd1) ? 32'd32
 // access landing inside that walk is not latched, and the pipeline wedges
 // 4096 clocks later (found during bring-up; docs/history.md, note 08). This
 // counter is the top level's half of the same rule.
-// INDEX 0 IS BOTH WAYS IN. The CONF_STR entry above is `FS0`, so a hand-picked
+// INDEX 0 IS BOTH WAYS IN. The CONF_STR entry above is `F0`, so a hand-picked
 // file arrives as index 0 - and MiSTer's framework loads `boot.rom` from the
 // core's own directory at startup with the same index 0, with no CONF_STR
 // entry required and the `.rom` name hardcoded. One decode covers both, which
@@ -339,21 +397,21 @@ wire [31:0] mem_mb = (mem_sel == 2'd1) ? 32'd32
 // three layers from a file somebody dropped in the games directory.
 wire prom_download = ioctl_download && (ioctl_index[7:0] == 8'd0);
 
-// A CHANGE OF MEMORY SIZE RESETS THE MACHINE, because the PROM sizes memory
-// exactly once - `szmem` probes each bank at boot and writes the result into
-// the MC's config registers - and nothing re-reads it. Changing it underneath
-// a running machine would leave the guest addressing memory that had moved.
-reg [1:0] mem_sel_d;
 reg [15:0] rst_cnt = 16'hFFFF;
 always @(posedge clk_sys) begin
-	mem_sel_d <= mem_sel;
-	if (RESET | status[0] | buttons[1] | prom_download | ~pll_locked
-	    | (mem_sel != mem_sel_d))
+	if (RESET | status[0] | buttons[1] | prom_download | ~pll_locked)
 		rst_cnt <= 16'hFFFF;
 	else if (rst_cnt != 0)
 		rst_cnt <= rst_cnt - 1'd1;
 end
 wire reset = (rst_cnt != 0);
+
+// THE SETTINGS ARE TAKEN FOR THE WHOLE RESET, not on one edge of it. At a core
+// load the framework sends the saved status and then boot.rom, and the tail of
+// 65,535 clocks after the download covers a status word that arrives late. The
+// memory size in particular can only change here: the PROM sizes memory once
+// (`szmem` writes the MC's config registers at boot) and nothing re-reads it.
+always @(posedge clk_sys) if (reset) cfg <= status;
 
 /////////////////////   PROM DOWNLOAD   //////////////////////////
 
@@ -426,6 +484,21 @@ always @(posedge clk_sys) begin
 	end
 end
 
+////////////////////////   KEYBOARD   ///////////////////////////
+
+// SWAP ALT/WIN KEYS (P3 Input) acts at once, so it reads `status`, not `cfg`.
+// i8042.sv hands the guest set 2 as it comes, so the swap is on set 2 codes,
+// {extended, code}: left Alt 11, right Alt E0 11, left Win E0 1F, right Win
+// E0 27. A key held down across the change is released as the other key.
+wire [8:0] key_ec = ps2_key[8:0];
+wire [8:0] key_sw = !status[23]        ? key_ec
+                  : (key_ec == 9'h011) ? 9'h11F
+                  : (key_ec == 9'h11F) ? 9'h011
+                  : (key_ec == 9'h111) ? 9'h127
+                  : (key_ec == 9'h127) ? 9'h111
+                  :                      key_ec;
+wire [10:0] ps2_key_sw = {ps2_key[10:9], key_sw};
+
 ////////////////////////   THE MACHINE   /////////////////////////
 
 wire        ram_req, ram_we, ram_ack, ram_last;
@@ -494,13 +567,13 @@ sgi_indy u_core
 
 	// The PROM's reset vector. KSEG1, uncached, as an R4000 starts.
 	.boot_pc          (32'hBFC00000),
-	.icache_en        (~status[11]),
-	.dcache_en        (~status[11]),
+	.icache_en        (~cfg[11]),
+	.dcache_en        (~cfg[11]),
 
 	.mem_mb           (mem_mb),
-	.dbg_raw_index    (status[14]),
+	.dbg_raw_index    (cfg[14]),
 
-	.audio_en         (~status[18]),
+	.audio_en         (~cfg[18]),
 	.audio_l          (hal2_l),
 	.audio_r          (hal2_r),
 
@@ -532,9 +605,9 @@ sgi_indy u_core
 
 	// FITTING THE GRAPHICS BOARD MOVES THE CONSOLE OFF THE SERIAL PORT. ARCS
 	// installs a DisplayController with ConsoleOut|Output and the PROM stops
-	// printing to the SCC entirely, so "Graphics board: None" is not a
+	// printing to the SCC entirely, so "Display: Serial console" is not a
 	// degraded mode - it is how you get a terminal.
-	.gfx_present      (~status[10]),
+	.gfx_present      (~cfg[10]),
 
 	.fbw_req          (fbw_req),
 	.fbw_we           (fbw_we),
@@ -571,10 +644,10 @@ sgi_indy u_core
 	.txdb             (txdb),
 	.scc_int_n        (),
 
-	.ps2_key          (ps2_key),
+	.ps2_key          (ps2_key_sw),
 	.ps2_mouse        (ps2_mouse),
 
-	.mac_addr         (mac_addr),
+	.mac_addr        (mac_addr),
 	.host_rtc         (host_rtc),
 
 	.scsi_img_mounted (scsi_img_mounted),
@@ -588,18 +661,20 @@ sgi_indy u_core
 	.scsi_sd_buff_dout(sd_buff_dout),
 	.scsi_sd_buff_din (scsi_sd_buff_din),
 	.scsi_sd_buff_wr  (sd_buff_wr),
-	.scsi_cache_bypass(status[17]),
-	// status[19] has no OSD entry: scripts/setopt.sh lookahead=off sets it.
-	// The WD33C93B's DATA IN look-ahead, as an instrument (rtl/scsi/wd33c93.sv).
-	.scsi_din_lookahead(~status[19]),
-	// status[20], no OSD entry either: setopt.sh dinstrict=off is build 44's
-	// DATA IN capture timing, for the A/B (docs/design/scsi-read-ready.md).
-	.scsi_din_strict  (~status[20]),
-	// status[21], no OSD entry: setopt.sh ipf=off turns ram_arb's instruction
-	// prefetch buffer off, for measuring it (build 46).
-	.ipf_enable       (~status[21]),
-	// status[22], no OSD entry: setopt.sh dpf=off, the data buffer (build 47).
-	.dpf_enable       (~status[22]),
+	.scsi_cache_bypass(cfg[17]),
+	// Bits 19-22 are rows only on a debug build's P9; on a release build
+	// scripts/setopt.sh sets them.
+	// status[19], setopt.sh lookahead=off: the WD33C93B's DATA IN look-ahead,
+	// as an instrument (rtl/scsi/wd33c93.sv).
+	.scsi_din_lookahead(~cfg[19]),
+	// status[20], setopt.sh dinstrict=off: build 44's DATA IN capture timing,
+	// for the A/B (docs/design/scsi-read-ready.md).
+	.scsi_din_strict  (~cfg[20]),
+	// status[21], setopt.sh ipf=off turns ram_arb's instruction prefetch
+	// buffer off, for measuring it (build 46).
+	.ipf_enable       (~cfg[21]),
+	// status[22], setopt.sh dpf=off, the data buffer (build 47).
+	.dpf_enable       (~cfg[22]),
 
 	.dbg_scsi_bcn     (scsi_bcn),
 	.dbg_scsi_stat    (scsi_stat),
@@ -670,8 +745,8 @@ function automatic logic dbg_serial(input logic [3:0] b);
 	else                dbg_serial = b[0];
 endfunction
 
-assign UART_TXD = (status[16:15] == 2'd1) ? dbg_serial(dbg_bit_a)
-                : (status[16:15] == 2'd2) ? dbg_serial(dbg_bit_b)
+assign UART_TXD = (cfg[16:15] == 2'd1) ? dbg_serial(dbg_bit_a)
+                : (cfg[16:15] == 2'd2) ? dbg_serial(dbg_bit_b)
                 :                           txdb;
 
 ////////////////////////////   MEMORY   //////////////////////////
@@ -703,7 +778,7 @@ fb_linecache #(.TRACK_ZERO(1'b0)) u_linecache
 	.fetching (),
 	.urgent   (lc_urgent),
 	.dbg_skips (),
-	.dbg_miss_mark (status[14])
+	.dbg_miss_mark (cfg[14])
 );
 
 // While it fetches a line the display needs both plane sets, and ddr3_mux
