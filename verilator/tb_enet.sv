@@ -24,6 +24,9 @@
 //        marks both statuses OLD
 //    E8  the station address lands in the store by bank, and Main reads it
 //        in one six-word read
+//    E10 the counts are per channel: a TX write does not drop Main's RX
+//        bookkeeping (build 53's bug: CRBDP lost under an FTP upload), an RX
+//        write does; RESET counts on both
 //============================================================================
 `timescale 1ns/1ps
 module tb_enet;
@@ -214,7 +217,7 @@ initial begin
     gr(TX_CTRL, v); check("a stop on the current count lands", v[9] == 1'b0);
     m_write(9'h17, seq, 32'h0800_3000);   // TX NBDP, as at the end of a chain
     gr(TX_NBDP, v); check("Main's store write lands", v == 32'h0800_3000);
-    m_write(9'h17, seq - 16'd1, 32'hDEAD_BEEF);
+    m_write(9'h17, seq - 16'h0100, 32'hDEAD_BEEF);
     gr(TX_NBDP, v); check("Main's store write on a stale count is dropped", v == 32'h0800_3000);
     gw(TX_NBDP, 32'h0800_4000);
     gw(TX_CTRL, 32'h0000_0200);       // a second start
@@ -273,6 +276,27 @@ initial begin
     $display("E9 INVAL");
     m_begin(); begin logic [15:0] r; spi_w(16'h0070, r); spi_w(16'd3, r); end m_end();
     check("the decoder pulses ex_inval", inval_seen);
+
+    $display("E10 per-channel counts");
+    gw(RX_RESET, 32'h0);
+    m_rd1(9'h100, st); seq = st[15:0];
+    gw(TX_NBDP, 32'h0800_5000);       // the driver queues an ACK
+    m_write(9'h18, seq, 32'h0812_3440);   // Main's CRBDP after delivering
+    gr(CRBDP, v); check("a TX write does not drop Main's CRBDP", v == 32'h0812_3440);
+    gw(RX_NBDP, 32'h0812_3500);       // an RX-side write
+    m_write(9'h18, seq, 32'h0812_3480);
+    gr(CRBDP, v); check("an RX write does drop it", v == 32'h0812_3440);
+    gw(RX_CTRL, 32'h0000_0200);       // RX running again
+    m_rd1(9'h100, st); seq = st[15:0];
+    gw(TX_NBDP, 32'h0800_6000);
+    m_write(9'h103, seq, 32'h1);      // stop RX on a snapshot older than a TX write
+    gr(RX_CTRL, v); check("an RX stop survives a TX write", v[9] == 1'b0);
+    m_rd1(9'h100, st); seq = st[15:0];
+    gw(RX_RESET, 32'h0);              // RESET is both channels'
+    m_write(9'h17, seq, 32'h0800_7000);
+    gr(TX_NBDP, v); check("RESET counts on TX too", v == 32'h0800_6000);
+    m_write(9'h18, seq, 32'h0812_3600);
+    gr(CRBDP, v); check("...and on RX", v != 32'h0812_3600);
 
     $display("\n== tb_enet: %0d checks, %0d failed ==", checks, fails);
     $display("ENET: %s", fails ? "FAIL" : "PASS");
