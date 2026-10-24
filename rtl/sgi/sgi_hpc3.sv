@@ -355,6 +355,7 @@ module sgi_hpc3 #(
     // driver: IRIX panicked in its allocator under an FTP upload.
     logic  [7:0] rx_seq = 8'd0;             // RX's registers, its CRBDP, the SEEQ
     logic  [7:0] tx_seq = 8'd0;             // TX's registers and pointer pair
+    logic  [2:0] seeq_cnt = 3'd0;           // the SEEQ's, for Main's address filter
     // The SEEQ interrupts on a NEW status its command enables, and HPC3 on a
     // descriptor's XIE (IRIS seeq8003.rs raise_interrupt).
     wire rx_irq = !rx_stat[7] && |(rx_cmd[4:0] & rx_stat[4:0]);
@@ -395,6 +396,20 @@ module sgi_hpc3 #(
     // RESET (0xD5) is both channels', so it counts on both.
     function automatic logic tx_ix(input logic [7:0] i);
         tx_ix = (i[7:1] == 7'h0B) || (i[7:1] == 7'h0D) || (i[7:3] == 5'h1B);
+    endfunction
+    // ...and which writes MOVE Main's bookkeeping, so that a decision Main
+    // made before them must be dropped: a descriptor or pointer register, a
+    // CTRL write that writes ACTIVE (AMASK clear), a RESET that changes the
+    // channel reset or loopback bit. Not CLRINT - RESET bit 1 alone, written
+    // on every interrupt: counting it dropped nearly every CRBDP update Main
+    // made under load, and the receive ring stalled until it wrapped (ACKs
+    // queued in Main, transmit at ~190 KB/s). Not BC, GIO, DEV, DMACFG,
+    // PIOCFG, and not the SEEQ, which counts on its own.
+    function automatic logic moves(input logic [7:0] i, input logic [31:0] v);
+        if (i >= 8'h14 && i <= 8'h1B)                moves = 1'b1;
+        else if (i == IX_RX_CTRL || i == IX_TX_CTRL) moves = !v[10];
+        else if (i == IX_RX_RESET)                   moves = (v[0] != e_rst) || (v[2] != e_loop);
+        else                                         moves = 1'b0;
     endfunction
 
     // Read addresses: the bus's access, or the window's own when it is the
@@ -724,7 +739,7 @@ module sgi_hpc3 #(
 
     // Main's live registers.
     function automatic logic [31:0] ex_live(input logic [8:0] i);
-        if (i == 9'h100)      ex_live = {8'hEC, 3'b000, e_rst, e_loop, enet_irq, tx_act, rx_act, tx_seq, rx_seq};
+        if (i == 9'h100)      ex_live = {8'hEC, seeq_cnt, e_rst, e_loop, enet_irq, tx_act, rx_act, tx_seq, rx_seq};
         else if (i == 9'h105) ex_live = {tx_cmd, rx_cmd, tx_stat, rx_stat};
         else                  ex_live = 32'h0;
     endfunction
@@ -841,10 +856,11 @@ module sgi_hpc3 #(
                     // ---- the guest's side of the Ethernet window
                     for (int w = 0; w < 2; w++) begin
                         if (w ? acc_wr1 : acc_wr0) begin
-                            if (enet_ix(w ? ix1 : ix0)) begin
+                            if (moves(w ? ix1 : ix0, st_wv[w])) begin
                                 if (tx_ix(w ? ix1 : ix0) || (w ? ix1 : ix0) == IX_RX_RESET) tx_seq <= tx_seq + 8'd1;
                                 if (!tx_ix(w ? ix1 : ix0))                                   rx_seq <= rx_seq + 8'd1;
                             end
+                            if (blk == BLK_SEEQ) seeq_cnt <= seeq_cnt + 3'd1;
                             if (blk == BLK_SEEQ && {addr[4:3], w[0]} == 3'd6) rx_cmd <= st_wv[w][7:0];
                             if (blk == BLK_SEEQ && {addr[4:3], w[0]} == 3'd7) tx_cmd <= st_wv[w][7:0];
                             if ((w ? ix1 : ix0) == IX_RX_CTRL && !st_wv[w][10]) rx_act <= st_wv[w][9];
