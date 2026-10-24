@@ -1,6 +1,8 @@
 # Ethernet for the Indy core - design
 
-Status: **design, Phase 0 done** (2026-10-23). It replaces the 2026-09-27
+Status: **Phase 1 built** (2026-10-23): the window in `rtl/sgi/sgi_hpc3.sv`,
+the decoder `rtl/mister/sgi_enet_uio.sv`, `ext_inval` in `ram_arb.sv`, the OSD
+row; `tb_enet` passes. Main's engine is on Main_MiSTer `sgi-indy`. Phase 0 done. It replaces the 2026-09-27
 draft, which put the SEEQ and both HPC3 Ethernet DMA engines in the FPGA
 behind a NeXT-style frame mailbox (~1,500-2,100 ALMs, *estimate*). This
 revision puts the chip on the ARM and keeps only a register window in the
@@ -198,7 +200,8 @@ One build in flight at a time; all fits on m900. Core work on
 * **Phase 1 - the FPGA window** (one fit, ≤ 500 ALMs). Gates: a `tb_enet`
   bench driving the window as `if_ec2` does (start sets ACTIVE, the pointer
   shift, seq-checked writes, RESET, interrupt ack, SEEQ reads); `run-prom`;
-  the PROM's own Ethernet tests.
+  the PROM's own Ethernet tests. *Built: `tb_enet` 41 checks, two mutants
+  caught (no pointer shift, no seq check).*
 * **Phase 2 - Main's engine against the sim.** `sim_cputest.cpp` grows the
   EXT_BUS port and runs `sgi_enet`'s engine against the sim's memory with a
   loopback or ARP/ICMP responder; gate: a guest image that pings through it.

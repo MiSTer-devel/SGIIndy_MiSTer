@@ -169,6 +169,18 @@ module sgi_indy #(
     output logic [15:0] audio_l,
     output logic [15:0] audio_r,
 
+    // ---- Ethernet: Main's port into the window (docs/design/ethernet-plan.md)
+    // From sgiindy.sv's UIO decoder; see sgi_hpc3.sv. ex_inval empties
+    // ram_arb's prefetch buffers after Main has written guest RAM.
+    input  logic        ex_rd,
+    input  logic        ex_wr,
+    input  logic  [8:0] ex_idx,
+    input  logic [15:0] ex_seq,
+    input  logic [31:0] ex_wdata,
+    output logic [31:0] ex_rdata,
+    output logic        ex_done,
+    input  logic        ex_inval,
+
     // ---- Newport's frame buffer -----------------------------------------
     // Two ports, because the frame buffer is VRAM: the rasteriser owns the
     // random port and the display owns the serial one, and they run at the
@@ -606,6 +618,7 @@ module sgi_indy #(
         .pf_enable  (ipf_enable),
         .cpu_dfill  (bus_dfill),
         .dpf_enable (dpf_enable),
+        .ext_inval  (ex_inval),
         .cpu_ack    (cpu_ram_ack),
         .cpu_last   (cpu_ram_last),
         .cpu_rdata  (cpu_ram_rdata),
@@ -776,6 +789,8 @@ module sgi_indy #(
     logic [63:0] hpc3_rdata;
     logic        hpc3_ack;
 
+    wire enet_irq;
+
     sgi_hpc3 #(.AUDIO_CLK_HZ(AUDIO_CLK_HZ)) u_hpc3 (
         .clk     (clk),
         .reset   (reset),
@@ -813,7 +828,16 @@ module sgi_indy #(
         .audio_en        (audio_en),
         .audio_l         (audio_l),
         .audio_r         (audio_r),
-        .dbg_audio       (dbg_audio_bcn)
+        .dbg_audio       (dbg_audio_bcn),
+
+        .ex_rd           (ex_rd),
+        .ex_wr           (ex_wr),
+        .ex_idx          (ex_idx),
+        .ex_seq          (ex_seq),
+        .ex_wdata        (ex_wdata),
+        .ex_rdata        (ex_rdata),
+        .ex_done         (ex_done),
+        .enet_irq        (enet_irq)
     );
 
     //------------------------------------------------------------------
@@ -973,7 +997,9 @@ module sgi_indy #(
         // latch, set per retrace and cleared by the CPU's STATUS read -
         // which is what retires the interrupt. Wiring the raw vblank level
         // here instead starved the machine (docs/design/newport-vdma.md, build 12).
-        .l0_source ({3'b000, mc_dma_int, 2'b00,
+        // L0 bit 3 is the Ethernet: the SEEQ's status and HPC3's XIE, from
+        // sgi_hpc3's window.
+        .l0_source ({3'b000, mc_dma_int, enet_irq, 1'b0,
                      scsi_irq | scsi_dma_irq, 1'b0}),
         .l1_source ({np_vblank, 7'h00}),
         // The SCC and the keyboard controller are mappable sources, not local

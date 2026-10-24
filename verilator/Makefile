@@ -188,6 +188,16 @@ tb_hpc3:
 	   tb_hpc3.sv $(HPC3) $(RTL)/sgi/hpc3_scsi_dma.sv $(RTL)/sgi/hal2.sv $(RTL)/sgi/hpc3_pbus_dma.sv
 	./obj_dir_tbhpc3/tb_hpc3
 
+# --- the Ethernet window: if_ec2 on the bus, Main through the UIO decoder ----
+# rtl/sgi/sgi_hpc3.sv's Ethernet registers and SEEQ against the contract in
+# docs/design/ethernet-plan.md section 3, Main's side through the real
+# rtl/mister/sgi_enet_uio.sv a strobe at a time.
+#   make -C verilator tb_enet
+tb_enet:
+	$V --binary --timing $(TBC_W) --unroll-count 2048 --unroll-stmts 20000 --top-module tb_enet --Mdir ./obj_dir_tbenet -o tb_enet \
+	   tb_enet.sv $(HPC3) $(RTL)/sgi/hpc3_scsi_dma.sv $(RTL)/sgi/hal2.sv $(RTL)/sgi/hpc3_pbus_dma.sv $(RTL)/mister/sgi_enet_uio.sv
+	./obj_dir_tbenet/tb_enet
+
 # --- the SCSI DMA engine alone, against a memory that answers late --------
 # ram_arb's grant and a DDR3 round trip hold the engine's request for tens of
 # clocks on the board; sim_ram.v answers in one or two. The bench sets both
