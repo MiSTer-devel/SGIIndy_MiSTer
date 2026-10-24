@@ -1,8 +1,11 @@
 # Ethernet for the Indy core - design
 
-Status: **Phase 1 built** (2026-10-23): the window in `rtl/sgi/sgi_hpc3.sv`,
-the decoder `rtl/mister/sgi_enet_uio.sv`, `ext_inval` in `ram_arb.sv`, the OSD
-row; `tb_enet` passes. Main's engine is on Main_MiSTer `sgi-indy`. Phase 0 done. It replaces the 2026-09-27
+Status: **working on the board** (2026-10-23, build 53b + Main_MiSTer `sgi-indy`
+52772a9): IRIX 5.3's `ec0` on the MiSTer's eth0 pings both ways and moves
+files by FTP md5-identical in both directions (section 8, Phase 3). The window
+is `rtl/sgi/sgi_hpc3.sv` + `rtl/mister/sgi_enet_uio.sv` + `ext_inval` in
+`ram_arb.sv` + the OSD row (513 ALMs); `tb_enet` 46 checks. Open: transmit
+speed, and the OSD's other interfaces (only eth0 tried). It replaces the 2026-09-27
 draft, which put the SEEQ and both HPC3 Ethernet DMA engines in the FPGA
 behind a NeXT-style frame mailbox (~1,500-2,100 ALMs, *estimate*). This
 revision puts the chip on the ARM and keeps only a register window in the
@@ -205,7 +208,18 @@ One build in flight at a time; all fits on m900. Core work on
 * **Phase 2 - Main's engine against the sim.** `sim_cputest.cpp` grows the
   EXT_BUS port and runs `sgi_enet`'s engine against the sim's memory with a
   loopback or ARP/ICMP responder; gate: a guest image that pings through it.
-* **Phase 3 - the board.** Main built and deployed to .143; IRIX by hand with
+* *Phase 2 was skipped for the board.* Its first run found what a harness
+  would have: under an FTP transfer IRIX panicked in its allocator, because
+  (a) one write count for both channels dropped Main's `CRBDP` after every
+  TX write and the RX ring fell out of step, (b) `CRBDP` and the TX pair were
+  outside the window's index range, (c) Main read a receive descriptor's
+  buffer address before its OWN bit. All three fixed (core d84ab10, Main
+  52772a9).
+* **Phase 3 - the board.** *Done for eth0, build 53b on .143: carrier at
+  boot, 691 frames received before login; ping m900 and the PC both ways;
+  FTP from the PC (IRIX ftpd, `guest` with a password set): `/unix` 3,173,840
+  bytes md5 = the image's at 137 KB/s, 2 MB up at 2.3 MB/s and back md5
+  identical at 56 KB/s; `netstat` 4,223 in / 4,342 out, no errors.* Main built and deployed to .143; IRIX by hand with
   misterkvms: `ifconfig ec0`, ping the MiSTer over tap0, ftp a file of known
   checksum both ways, then macvlan to a LAN host; every OSD choice; plus
   disk check, cpu-tests and audio as usual.
