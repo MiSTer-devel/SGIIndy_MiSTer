@@ -13,11 +13,12 @@ settings latched at reset, *Changes pending*, Swap Alt/Win keys), up to 128 MB
 of memory, OSD resets that no longer fail POST's keyboard-controller test, and
 the keyboard in scan-code set 3 when IRIX asks for it (Ctrl, Alt and Caps Lock
 right under IRIX), on top of build 50's IRIX 6.2/6.5 install and IRIX menus.
+The framework's YC/composite output is left out (it cannot carry this raster).
 It was built with Quartus Prime Lite 17.0.2 **on the Linux build machine
-(m900)** at fitter seed 2, the seed `sgiindy.qsf` keeps: 36,827 of 41,910
-ALMs (88 %), 492 of 553 M10K blocks, 57 of 112 DSP blocks, and timing met in
-every check - worst setup slack +1.222 ns on the 50 MHz core clock and
-+0.282 ns on the HDMI pixel clock. `SEED=2 BUILD_DATE=261023 bash scripts/build.sh` on that machine
+(m900)** at fitter seed 3, the seed `sgiindy.qsf` keeps: 37,094 of 41,910
+ALMs (89 %), 493 of 553 M10K blocks, 61 of 112 DSP blocks, and timing met in
+every check - worst setup slack +1.521 ns on the 50 MHz core clock and
++0.201 ns on the HDMI pixel clock. `SEED=3 BUILD_DATE=261023 bash scripts/build.sh` on that machine
 rebuilds it; Quartus on Windows places the same inputs differently, so a
 bitstream is only bit-identical on the machine that built it. The earlier
 releases, `SGIIndy_20260928.rbf` (build 50, seed 5, m900),
