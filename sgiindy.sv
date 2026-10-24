@@ -125,6 +125,12 @@ localparam CONF_STR = {
 	"F0,ROMBIN,Load ROM;",
 	"-;",
 	"O[13:12],Memory,32MB,48MB,64MB,128MB;",
+	// THE NETWORK INTERFACE (docs/design/ethernet-plan.md) - which of the
+	// MiSTer's interfaces the Indy's ec0 is wired to. Main_MiSTer's sgi_enet
+	// reads these bits itself and reopens the link at once, so the row acts
+	// without a reset and stays out of "Changes pending"; None is a pulled
+	// cable. eth0 first and default, the standard's order (Dani 2026-10-23).
+	"O[26:24],Network interface,eth0,None,eth1,macvlan,tap0;",
 	"-;",
 	"P1,Machine;",
 	"P2,Video;",
@@ -266,11 +272,32 @@ assign sd_wr = {scsi_sd_wr[6], scsi_sd_wr[2], scsi_sd_wr[1], 1'b0};
 assign scsi_sd_ack       = {sd_ack[3], 3'b000, sd_ack[2], sd_ack[1], 1'b0};
 assign scsi_img_mounted  = {img_mounted[3], 3'b000, img_mounted[2], img_mounted[1], 1'b0};
 
+// Main's port into the Ethernet window (rtl/mister/sgi_enet_uio.sv).
+wire [35:0] EXT_BUS;
+wire        ex_rd, ex_wr, ex_done, ex_inval;
+wire  [8:0] ex_idx;
+wire [15:0] ex_seq;
+wire [31:0] ex_wdata, ex_rdata;
+
+sgi_enet_uio u_enet_uio
+(
+	.clk      (clk_sys),
+	.EXT_BUS  (EXT_BUS),
+	.ex_rd    (ex_rd),
+	.ex_wr    (ex_wr),
+	.ex_idx   (ex_idx),
+	.ex_seq   (ex_seq),
+	.ex_wdata (ex_wdata),
+	.ex_rdata (ex_rdata),
+	.ex_done  (ex_done),
+	.ex_inval (ex_inval)
+);
+
 hps_io #(.CONF_STR(CONF_STR), .WIDE(1), .VDNUM(VDNUM)) hps_io
 (
 	.clk_sys(clk_sys),
 	.HPS_BUS(HPS_BUS),
-	.EXT_BUS(),
+	.EXT_BUS(EXT_BUS),
 	.gamma_bus(),
 
 	.forced_scandoubler(forced_scandoubler),
@@ -574,6 +601,15 @@ sgi_indy u_core
 	.audio_en         (~cfg[18]),
 	.audio_l          (hal2_l),
 	.audio_r          (hal2_r),
+
+	.ex_rd            (ex_rd),
+	.ex_wr            (ex_wr),
+	.ex_idx           (ex_idx),
+	.ex_seq           (ex_seq),
+	.ex_wdata         (ex_wdata),
+	.ex_rdata         (ex_rdata),
+	.ex_done          (ex_done),
+	.ex_inval         (ex_inval),
 
 	.ram_req          (ram_req),
 	.ram_we           (ram_we),

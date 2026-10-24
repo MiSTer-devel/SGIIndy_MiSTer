@@ -344,6 +344,7 @@ keeps the settings in `SGIINDY_v1.CFG`.
 | top | CD-ROM (ID 6) | `SC3` | a CD-ROM image on ID 6 |
 | top | Load ROM | `F0,ROMBIN` | an SGI PROM image at ioctl index 0, the same index the automatic `boot.rom` uses, for that session only; the core is held in reset until the download finishes |
 | top | Memory: 32MB / 48MB / 64MB / 128MB | `O[13:12]` | main memory size; 32 MB is the default (the standard's "smallest that runs the usual OS") |
+| top | Network interface: eth0 / None / eth1 / macvlan / tap0 | `O[26:24]` | the host side of `ec0` ([ethernet-plan.md](../design/ethernet-plan.md)); Main_MiSTer's `sgi_enet` reads the bits itself and reopens the link at once, so the row is outside *Changes pending*; the value order is Main's A2065 mode numbering, as on the HP 9000 |
 | P1 | Primary caches: On / Off | `O[11]` | both primary caches, for bisecting a fault onto them without a rebuild |
 | P2 | Display: Graphics / Serial console | `O[10]` | whether Newport answers on the bus. **Fitting it moves the console off the serial port**: ARCS installs a DisplayController with `ConsoleOut\|Output` and the PROM stops printing to the SCC, so *Serial console* is a real machine configuration, not a degraded mode |
 | P2 | Aspect ratio | `O[122:121]` | Original (5:4), Full Screen, and the two custom ratios |

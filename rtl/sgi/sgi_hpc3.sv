@@ -86,6 +86,21 @@ module sgi_hpc3 #(
     // Beacon words: HAL2's two (hal2.sv dbg) and the PBUS engine's.
     output logic [63:0] dbg_audio [3],
 
+    // ---- Ethernet: the window Main drives (docs/design/ethernet-plan.md) --
+    // One request at a time from sgiindy.sv's UIO decoder: ex_rd reads word
+    // ex_idx, ex_wr writes ex_wdata there; ex_done answers either. Indices
+    // below 0x100 are the register store, 0x100 and up the live registers
+    // ("the ethernet window" below).
+    input  logic        ex_rd,
+    input  logic        ex_wr,
+    input  logic  [8:0] ex_idx,
+    input  logic [15:0] ex_seq,
+    input  logic [31:0] ex_wdata,
+    output logic [31:0] ex_rdata,
+    output logic        ex_done,
+    // The Ethernet interrupt: IOC local 0 bit 3.
+    output logic        enet_irq,
+
     // Combinational: 0 means this offset is not decoded here at all, and the
     // access should fall through to the core's unclaimed-cycle path.
     output logic        claimed
@@ -97,6 +112,9 @@ module sgi_hpc3 #(
     localparam logic [18:0] DMA_END       = 19'h20000;
     localparam logic [18:0] GEN_BASE      = 19'h30000;  // intstat, misc, eeprom, bus_error
     localparam logic [18:0] GEN_END       = 19'h30020;
+    // The SEEQ 80C03's eight byte registers, one per word.
+    localparam logic [18:0] SEEQ_BASE     = 19'h54000;
+    localparam logic [18:0] SEEQ_END      = 19'h54020;
     // PBUS PIO channels 0-3: HAL2 itself, its AES, volume and synth ports.
     localparam logic [18:0] HAL2_BASE     = 19'h58000;
     localparam logic [18:0] HAL2_END      = 19'h59000;
@@ -107,7 +125,7 @@ module sgi_hpc3 #(
     localparam logic [18:0] WRONLY_BASE   = 19'h5E000;  // prom_we, prom_swap, gen_out
     localparam logic [18:0] WRONLY_END    = 19'h60000;
 
-    typedef enum logic [2:0] {
+    typedef enum logic [3:0] {
         BLK_NONE,
         BLK_DESC,     // channel + 0x0000 / 0x0004: buffer and descriptor pointers
         BLK_CTRL,     // channel + 0x1000..0x101F: byte count, control, fifo ptrs, config
@@ -115,7 +133,8 @@ module sgi_hpc3 #(
         BLK_CFGDMA,
         BLK_CFGPIO,
         BLK_HAL2,
-        BLK_WRONLY
+        BLK_WRONLY,
+        BLK_SEEQ      // 0x54000: the SEEQ 80C03
     } blk_t;
 
     // ---- the store -------------------------------------------------------
@@ -190,6 +209,7 @@ module sgi_hpc3 #(
         else if (addr >= CFGDMA_BASE && addr < CFGDMA_END) blk = BLK_CFGDMA;
         else if (addr >= CFGPIO_BASE && addr < CFGPIO_END) blk = BLK_CFGPIO;
         else if (addr >= WRONLY_BASE && addr < WRONLY_END) blk = BLK_WRONLY;
+        else if (addr >= SEEQ_BASE   && addr < SEEQ_END)   blk = BLK_SEEQ;
     end
 
     assign claimed = (blk != BLK_NONE);
@@ -313,21 +333,64 @@ module sgi_hpc3 #(
     // WHICH BLOCKS ARE IN THE STORE. SCSI channel 0's sub-block is not: the
     // engine owns those registers. Neither are HAL2's file, the write-only
     // PBUS ports or an address this module does not claim.
-    wire stored = (blk == BLK_GEN) || (blk == BLK_CFGDMA) || (blk == BLK_CFGPIO)
+    wire stored = (blk == BLK_GEN) || (blk == BLK_CFGDMA) || (blk == BLK_CFGPIO) || (blk == BLK_SEEQ)
                || (((blk == BLK_DESC) || (blk == BLK_CTRL)) && !scsi0_blk && !pbus_blk);
 
+    // ---- the Ethernet's live state (docs/design/ethernet-plan.md) ---------
+    // What IRIX's if_ec2 reads with no time to wait lives here, not in the
+    // store and not in Main: each channel's ACTIVE, the SEEQ's status and
+    // command bytes, the interrupt. Main moves the frames and writes these
+    // back through its port. The TX command's bits 6:5 pick the bank regs 0-5
+    // write into (0 station address, 1 and 2 multicast filter and control).
+    logic  [7:0] rx_cmd, tx_cmd;
+    logic  [7:0] rx_stat, tx_stat;          // bit 7 OLD: read, or acknowledged
+    logic        rx_act, tx_act;            // CTRL bit 9 of each channel
+    logic        e_rst, e_loop;             // RESET bits 0 and 2, as written
+    logic        e_dmairq;                  // a descriptor's XIE, raised by Main
+    logic        e_nocarr = 1'b1;           // SEEQ reg 5 bit 1, from Main
+    logic [15:0] e_seq = 16'd0;             // the guest's writes to the window
+    // The SEEQ interrupts on a NEW status its command enables, and HPC3 on a
+    // descriptor's XIE (IRIS seeq8003.rs raise_interrupt).
+    wire rx_irq = !rx_stat[7] && |(rx_cmd[4:0] & rx_stat[4:0]);
+    wire tx_irq = !tx_stat[7] && |(tx_cmd[3:0] & tx_stat[3:0]);
+    assign enet_irq = rx_irq | tx_irq | e_dmairq;
+
     // The store's index for the register this access's half w addresses. An
-    // if/else chain for the same reason hpc3_rd below is one.
+    // if/else chain for the same reason hpc3_rd below is one. The SEEQ's
+    // written registers are kept in 0x40-0x5F as {bank, reg}, which is where
+    // Main reads the station address.
     function automatic logic [7:0] st_idx(input logic w);
         if (blk == BLK_CTRL)        st_idx = {1'b1, sub, ctrl_reg(w)};
         else if (blk == BLK_DESC)   st_idx = {3'b000, sub, w};
         else if (blk == BLK_GEN)    st_idx = {5'b00100, addr[4:3], w};
         else if (blk == BLK_CFGDMA) st_idx = {5'b00101, addr[11:9]};
+        else if (blk == BLK_SEEQ)   st_idx = {3'b010, tx_cmd[6:5], addr[4:3], w};
         else                        st_idx = {4'b0011, addr[11:8]};   // BLK_CFGPIO
     endfunction
 
-    assign st_ra0 = st_idx(1'b0);
-    assign st_ra1 = st_idx(1'b1);
+    // The store indices the Ethernet window acts on (sgi_hpc3's own numbering:
+    // descriptor pairs {sub-block, word}, control groups {1, sub-block, reg}).
+    localparam logic [7:0] IX_RX_NBDP  = 8'h15;    // 0x14004
+    localparam logic [7:0] IX_TX_NBDP  = 8'h17;    // 0x16004
+    localparam logic [7:0] IX_CRBDP    = 8'h18;    // 0x18000
+    localparam logic [7:0] IX_CPFXBDP  = 8'h1A;    // 0x1A000
+    localparam logic [7:0] IX_PPFXBDP  = 8'h1B;    // 0x1A004
+    localparam logic [7:0] IX_RX_CTRL  = 8'hD1;    // 0x15004
+    localparam logic [7:0] IX_RX_RESET = 8'hD5;    // 0x15014
+    localparam logic [7:0] IX_TX_CTRL  = 8'hD9;    // 0x17004
+
+    // Every store word the guest's writes to the window land in: the four
+    // descriptor pairs from 0x14000, the two control groups, the SEEQ.
+    function automatic logic enet_ix(input logic [7:0] i);
+        enet_ix = (i[7:3] == 5'b00010) || (i[7:4] == 4'hD) || (i[7:5] == 3'b010);
+    endfunction
+
+    // Read addresses: the bus's access, or the window's own when it is the
+    // one using the store (the TX/RX start and Main's port, below).
+    logic  [7:0] ow_ra0, ow_ra1;
+    logic        ow_rd;
+    assign st_ra0 = ow_rd ? ow_ra0 : st_idx(1'b0);
+    assign st_ra1 = ow_rd ? ow_ra1 : st_idx(1'b1);
 
     // What a stored half reads: the word out of the store, except for the two
     // halves of intstat. 0x1FBB0000 and 0x1FBB000C are generated, not stored;
@@ -335,11 +398,28 @@ module sgi_hpc3 #(
     // the generated pair and a write still lands in it - nothing reads it, and
     // keeping the write unconditional keeps the write port's address one
     // function of the address.
+    //
+    // The Ethernet's live bits are generated the same way. Each CTRL reads
+    // its channel's ACTIVE at bit 9 and the SEEQ's status in its low byte (RX
+    // keeps its own bit 6, which HPC3 sets); RESET reads the interrupt at bit
+    // 1. A SEEQ register reads as the 80C03 answers it: regs 0-4 (collision
+    // counters, which reg 0 being 0 identifies an 80C03 by) 0, reg 5 NO_SQE
+    // and the carrier, 6 and 7 the status bytes.
     function automatic logic [31:0] st_rd(input logic w, input logic [31:0] q);
+        logic [7:0] ix;
+        ix = st_idx(w);
         if (blk == BLK_GEN)
             st_rd = ({addr[4:3], w} == 3'd0) ? {27'h0, intstat[4:0]}
                   : ({addr[4:3], w} == 3'd3) ? {22'h0, intstat[9:5], 5'h0}
                   :                            q;
+        else if (blk == BLK_SEEQ)
+            st_rd = ({addr[4:3], w} == 3'd5) ? {30'h0, e_nocarr, 1'b1}
+                  : ({addr[4:3], w} == 3'd6) ? {24'h0, rx_stat}
+                  : ({addr[4:3], w} == 3'd7) ? {24'h0, tx_stat}
+                  :                            32'h0;
+        else if (ix == IX_RX_CTRL)  st_rd = {q[31:10], rx_act, q[8], rx_stat[7], q[6], rx_stat[5:0]};
+        else if (ix == IX_TX_CTRL)  st_rd = {q[31:10], tx_act, q[8], tx_stat};
+        else if (ix == IX_RX_RESET) st_rd = {q[31:2], enet_irq, q[0]};
         else st_rd = q;
     endfunction
 
@@ -584,16 +664,61 @@ module sgi_hpc3 #(
     // while it runs is remembered in `pend` and served when it is over; the
     // blocks outside the store are answered throughout, as they are in every
     // other state.
-    typedef enum logic [1:0] { ST_IDLE, ST_ACC, ST_WR1, ST_CLR } st_t;
+    //
+    // THE ETHERNET WINDOW uses the same one-access-at-a-time machine, so the
+    // store never has two writers:
+    //   * A start - a CTRL write with AMASK (bit 10) clear and ACTIVE (bit 9)
+    //     set on an idle channel - is followed by what HPC3's first descriptor
+    //     fetch does to the pointers: on TX `PPFXBDP <- CPFXBDP; CPFXBDP <-
+    //     NBDP` (ST_SH0..ST_SH2), on RX `CRBDP <- NBDP`. IRIX's if_ec2 reads
+    //     the TX pair at the top of every transmit with no ACTIVE check, and a
+    //     stale pair frees the packet just started; Main is milliseconds away,
+    //     so the move is made here before the CPU's write is acknowledged.
+    //   * Main's port (ST_EX, ST_EX2): a store word, or a live register. A
+    //     store write and a channel stop carry the write count Main read its
+    //     snapshot under and are dropped if the guest has written the window
+    //     since, so a reset or restart is never overwritten by a decision
+    //     made before it. The status bytes, the DMA interrupt and the carrier
+    //     are Main's alone and always land.
+    typedef enum logic [3:0] { ST_IDLE, ST_ACC, ST_WR1, ST_CLR,
+                               ST_SH0, ST_SH1, ST_SH2, ST_EX, ST_EX2 } st_t;
     st_t         ststate;
     logic  [7:0] clr_idx, idx1_r;
     logic [31:0] wv1_r;
     logic        pend;
+    logic        sh_tx, sh_rx;             // a start waiting for its pointer move
+    logic [31:0] sh_nbdp;
+    logic        ex_pend, ex_w;            // Main's request, held until served
+    logic  [8:0] ex_ix;
+    logic [15:0] ex_sq;
+    logic [31:0] ex_wd;
+    wire         ex_ok = (ex_sq == e_seq);
+
+    // A start, from this access's halves.
+    wire  [7:0] ix0 = st_idx(1'b0), ix1 = st_idx(1'b1);
+    function automatic logic starts(input logic [31:0] v, input logic act);
+        starts = !v[10] && v[9] && !act;
+    endfunction
+    wire tx_go = (acc_wr0 && (ix0 == IX_TX_CTRL) && starts(st_wv[0], tx_act))
+              || (acc_wr1 && (ix1 == IX_TX_CTRL) && starts(st_wv[1], tx_act));
+    wire rx_go = !e_rst
+              && ((acc_wr0 && (ix0 == IX_RX_CTRL) && starts(st_wv[0], rx_act))
+               || (acc_wr1 && (ix1 == IX_RX_CTRL) && starts(st_wv[1], rx_act)));
+
+    // Main's live registers.
+    function automatic logic [31:0] ex_live(input logic [8:0] i);
+        if (i == 9'h100)      ex_live = {8'hEC, 3'b000, e_rst, e_loop, enet_irq, tx_act, rx_act, e_seq};
+        else if (i == 9'h105) ex_live = {tx_cmd, rx_cmd, tx_stat, rx_stat};
+        else                  ex_live = 32'h0;
+    endfunction
 
     always_comb begin
-        st_we = 1'b0;
-        st_wa = 8'h00;
-        st_wd = 32'h0;
+        st_we  = 1'b0;
+        st_wa  = 8'h00;
+        st_wd  = 32'h0;
+        ow_rd  = 1'b0;
+        ow_ra0 = 8'h00;
+        ow_ra1 = 8'h00;
         if (ststate == ST_CLR) begin
             st_we = 1'b1;
             st_wa = clr_idx;
@@ -609,16 +734,56 @@ module sgi_hpc3 #(
         else if (ststate == ST_WR1) begin
             st_we = 1'b1; st_wa = idx1_r; st_wd = wv1_r;
         end
+        else if (ststate == ST_SH0) begin
+            ow_rd  = 1'b1;
+            ow_ra0 = sh_tx ? IX_TX_NBDP : IX_RX_NBDP;
+            ow_ra1 = IX_CPFXBDP;
+        end
+        else if (ststate == ST_SH1) begin
+            st_we = 1'b1;
+            if (sh_tx) begin st_wa = IX_PPFXBDP; st_wd = st_q1; end    // the old CPFXBDP
+            else       begin st_wa = IX_CRBDP;   st_wd = st_q0; end    // RX NBDP
+        end
+        else if (ststate == ST_SH2) begin
+            st_we = 1'b1; st_wa = IX_CPFXBDP; st_wd = sh_nbdp;
+        end
+        else if (ststate == ST_EX) begin
+            ow_rd  = 1'b1;
+            ow_ra0 = ex_ix[7:0];
+            if (ex_w && !ex_ix[8] && ex_ok) begin
+                st_we = 1'b1; st_wa = ex_ix[7:0]; st_wd = ex_wd;
+            end
+        end
     end
 
     always_ff @(posedge clk) begin
-        ack <= 1'b0;
+        ack     <= 1'b0;
+        ex_done <= 1'b0;
+        if (ex_rd || ex_wr) begin
+            ex_pend <= 1'b1;
+            ex_w    <= ex_wr;
+            ex_ix   <= ex_idx;
+            ex_sq   <= ex_seq;
+            ex_wd   <= ex_wdata;
+        end
 
         if (reset) begin
-            ststate <= ST_CLR;
-            clr_idx <= 8'h00;
-            pend    <= 1'b0;
-            rdata   <= 64'h0;
+            ststate  <= ST_CLR;
+            clr_idx  <= 8'h00;
+            pend     <= 1'b0;
+            rdata    <= 64'h0;
+            sh_tx    <= 1'b0;
+            sh_rx    <= 1'b0;
+            ex_pend  <= 1'b0;
+            rx_act   <= 1'b0;
+            tx_act   <= 1'b0;
+            e_rst    <= 1'b0;
+            e_loop   <= 1'b0;
+            e_dmairq <= 1'b0;
+            rx_stat  <= 8'h80;
+            tx_stat  <= 8'h80;
+            rx_cmd   <= 8'h00;
+            tx_cmd   <= 8'h00;
         end else begin
             // The blocks that are not in the store answer in the clock after
             // `sel`, whatever the store is doing - including during the reset
@@ -629,7 +794,7 @@ module sgi_hpc3 #(
                 rdata <= {hpc3_rd(1'b0), hpc3_rd(1'b1)};
                 ack   <= 1'b1;
             end
-            if (sel && stored && (ststate != ST_IDLE)) pend <= 1'b1;
+            if (sel && stored && ((ststate != ST_IDLE) || ex_pend)) pend <= 1'b1;
 
             case (ststate)
                 ST_CLR: begin
@@ -638,7 +803,13 @@ module sgi_hpc3 #(
                 end
 
                 ST_IDLE:
-                    if (pend || (sel && stored)) begin
+                    // Main's request first: it is two clocks, and the bus
+                    // waits for its acknowledge however long it takes.
+                    if (ex_pend) begin
+                        ststate <= ST_EX;
+                        ex_pend <= 1'b0;
+                    end
+                    else if (pend || (sel && stored)) begin
                         ststate <= ST_ACC;
                         pend    <= 1'b0;
                     end
@@ -649,17 +820,110 @@ module sgi_hpc3 #(
                     rdata  <= {st_rdv[0], st_rdv[1]};
                     idx1_r <= st_idx(1'b1);
                     wv1_r  <= st_wv[1];
+
+                    // ---- the guest's side of the Ethernet window
+                    for (int w = 0; w < 2; w++) begin
+                        if (w ? acc_wr1 : acc_wr0) begin
+                            if (enet_ix(w ? ix1 : ix0)) e_seq <= e_seq + 16'd1;
+                            if (blk == BLK_SEEQ && {addr[4:3], w[0]} == 3'd6) rx_cmd <= st_wv[w][7:0];
+                            if (blk == BLK_SEEQ && {addr[4:3], w[0]} == 3'd7) tx_cmd <= st_wv[w][7:0];
+                            if ((w ? ix1 : ix0) == IX_RX_CTRL && !st_wv[w][10]) rx_act <= st_wv[w][9];
+                            if ((w ? ix1 : ix0) == IX_TX_CTRL && !st_wv[w][10]) tx_act <= st_wv[w][9];
+                            if ((w ? ix1 : ix0) == IX_RX_RESET) begin
+                                // rising: both channels stop and the SEEQ is
+                                // held; falling: it comes out with its
+                                // commands clear and both statuses OLD
+                                if (st_wv[w][0] && !e_rst) begin
+                                    rx_act <= 1'b0;
+                                    tx_act <= 1'b0;
+                                end
+                                if (!st_wv[w][0] && e_rst) begin
+                                    rx_cmd   <= 8'h00;
+                                    tx_cmd   <= 8'h00;
+                                    rx_stat  <= 8'h80;
+                                    tx_stat  <= 8'h80;
+                                    e_dmairq <= 1'b0;
+                                end
+                                // CLRINT
+                                if (st_wv[w][1]) begin
+                                    rx_stat[7] <= 1'b1;
+                                    tx_stat[7] <= 1'b1;
+                                    e_dmairq   <= 1'b0;
+                                end
+                                e_rst  <= st_wv[w][0];
+                                e_loop <= st_wv[w][2];
+                            end
+                        end
+                    end
+                    // Reading a SEEQ status register marks it OLD - the
+                    // addressed word only, as for SCSI channel 0's control.
+                    if (!we && blk == BLK_SEEQ && {addr[4:3], aoff[2]} == 3'd6) rx_stat[7] <= 1'b1;
+                    if (!we && blk == BLK_SEEQ && {addr[4:3], aoff[2]} == 3'd7) tx_stat[7] <= 1'b1;
+                    sh_tx <= tx_go;
+                    sh_rx <= rx_go;
+
                     if (acc_wr0 && acc_wr1) ststate <= ST_WR1;
+                    else if (tx_go || rx_go) ststate <= ST_SH0;
                     else begin
                         ack     <= 1'b1;
                         ststate <= ST_IDLE;
                     end
                 end
 
-                ST_WR1: begin
+                ST_WR1:
+                    if (sh_tx || sh_rx) ststate <= ST_SH0;
+                    else begin
+                        ack     <= 1'b1;
+                        ststate <= ST_IDLE;
+                    end
+
+                ST_SH0: ststate <= ST_SH1;
+
+                ST_SH1:
+                    if (sh_tx) begin
+                        sh_nbdp <= st_q0;
+                        ststate <= ST_SH2;
+                    end else begin
+                        sh_rx   <= 1'b0;
+                        ack     <= 1'b1;
+                        ststate <= ST_IDLE;
+                    end
+
+                ST_SH2: begin
+                    sh_tx   <= 1'b0;
                     ack     <= 1'b1;
                     ststate <= ST_IDLE;
                 end
+
+                ST_EX:
+                    if (ex_w) begin
+                        if (ex_ix == 9'h101) rx_stat <= ex_wd[7:0];
+                        if (ex_ix == 9'h102) tx_stat <= ex_wd[7:0];
+                        if (ex_ix == 9'h103 && ex_ok) begin
+                            if (ex_wd[0]) rx_act <= 1'b0;
+                            if (ex_wd[1]) tx_act <= 1'b0;
+                        end
+                        if (ex_ix == 9'h104) begin
+                            if (ex_wd[0]) e_dmairq <= 1'b1;
+                            e_nocarr <= ex_wd[1];
+                        end
+                        ex_done <= 1'b1;
+                        ststate <= ST_IDLE;
+                    end
+                    else if (ex_ix[8]) begin
+                        ex_rdata <= ex_live(ex_ix);
+                        ex_done  <= 1'b1;
+                        ststate  <= ST_IDLE;
+                    end
+                    else ststate <= ST_EX2;
+
+                ST_EX2: begin
+                    ex_rdata <= st_q0;
+                    ex_done  <= 1'b1;
+                    ststate  <= ST_IDLE;
+                end
+
+                default: ststate <= ST_IDLE;
             endcase
         end
     end

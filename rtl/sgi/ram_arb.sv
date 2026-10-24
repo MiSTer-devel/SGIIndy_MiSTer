@@ -123,6 +123,10 @@ module ram_arb (
     // the data buffer's switch.
     input  logic        cpu_dfill,
     input  logic        dpf_enable,
+    // Main has written guest RAM from the ARM (the Ethernet's frames and
+    // descriptors, docs/design/ethernet-plan.md): those writes never pass the
+    // snoop below, so this pulse forgets both buffers outright.
+    input  logic        ext_inval,
     output logic        cpu_ack,
     output logic        cpu_last,
     // The word that goes with cpu_ack: the port's, or the buffer's.
@@ -183,6 +187,7 @@ module ram_arb (
     logic  [1:0] pf_v    [2];   // each line whole, and not written since
     logic [63:0] pf_mem  [16];  // buffer b, line l, word w at {b, l, w}
     logic        pf_run;        // the CPU's transaction is a 12-word burst
+    logic        pf_kill;       // ...whose words may predate an ext_inval
     logic        pf_buf;        // ...filling this buffer
     logic  [3:0] pf_beat;       // its words received so far
     logic        srv;           // answering a fill from a buffer
@@ -239,6 +244,7 @@ module ram_arb (
             pf_v[0]    <= 2'b00;
             pf_v[1]    <= 2'b00;
             pf_run     <= 1'b0;
+            pf_kill    <= 1'b0;
             pf_buf     <= 1'b0;
             pf_beat    <= 4'd0;
             srv        <= 1'b0;
@@ -293,11 +299,24 @@ module ram_arb (
             if (port_cpu_word && pf_run) begin
                 pf_beat <= pf_beat + 4'd1;
                 if (pf_beat >= 4'd4) pf_mem[{pf_buf, 3'(pf_beat - 4'd4)}] <= ram_rdata;
-                if (pf_beat == 4'd7)  pf_v[pf_buf][0] <= 1'b1;
+                if (pf_beat == 4'd7 && !pf_kill)  pf_v[pf_buf][0] <= 1'b1;
                 if (pf_beat == 4'd11) begin
-                    pf_v[pf_buf][1] <= 1'b1;
+                    if (!pf_kill) pf_v[pf_buf][1] <= 1'b1;
                     pf_run          <= 1'b0;
                 end
+            end
+
+            // ---- Main's writes: forget everything buffered. A burst still
+            // streaming in may have read its lines before Main's writes
+            // landed, so it finishes (the CPU's own words are current: it
+            // asked for them before the frame was there to read) but its
+            // prefetched lines are never marked whole. A burst issued in this
+            // same clock reads after the writes and is kept.
+            if (pf_new) pf_kill <= 1'b0;
+            if (ext_inval) begin
+                pf_v[0] <= 2'b00;
+                pf_v[1] <= 2'b00;
+                if (pf_run && !pf_new) pf_kill <= 1'b1;
             end
 
             // ---- the snoop: a write into a buffered line forgets it, in both

@@ -41,6 +41,17 @@ module sim_top
     output wire [15:0] audio_r,
     output wire [63:0] audio0, audio1, audio2,
 
+    // Main's port into the Ethernet window (sgi_hpc3.sv), for a harness that
+    // plays Main's sgi_enet; all zero, the window is only the guest's.
+    input  wire        ex_rd,
+    input  wire        ex_wr,
+    input  wire  [8:0] ex_idx,
+    input  wire [15:0] ex_seq,
+    input  wire [31:0] ex_wdata,
+    output wire [31:0] ex_rdata,
+    output wire        ex_done,
+    input  wire        ex_inval,
+
     // Serial receive for the console channel. Idle mark is 1; the GUI harness
     // shifts typed characters out on it so the Command Monitor can be driven.
     input  wire        rxdb,
@@ -265,6 +276,14 @@ module sim_top
         .audio_l       (audio_l),
         .audio_r       (audio_r),
         .dbg_audio_bcn (audio_bcn),
+        .ex_rd         (ex_rd),
+        .ex_wr         (ex_wr),
+        .ex_idx        (ex_idx),
+        .ex_seq        (ex_seq),
+        .ex_wdata      (ex_wdata),
+        .ex_rdata      (ex_rdata),
+        .ex_done       (ex_done),
+        .ex_inval      (ex_inval),
 
         .fbw_req       (fbw_req),
         .fbw_we        (fbw_we),

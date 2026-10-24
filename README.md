@@ -97,6 +97,7 @@ settings (so does any other reset). Shut IRIX down first - see below.
 | top | **CD-ROM (ID 6)** | the CD-ROM drive: an ISO image of an SGI CD (`.iso`) |
 | top | **Load ROM** | a different boot PROM image for this session; `boot.rom` is loaded at every start |
 | top | **Memory** | 32 (the default), 48, 64 or 128 MB. IRIX 6.5 wants 64 or more |
+| top | **Network interface** | which of the MiSTer's interfaces `ec0` uses: *eth0* (the default), *None* (a pulled cable), *eth1*, *macvlan* (eth0 with the Indy's own MAC) or *tap0*. Acts at once; needs the matching Main_MiSTer |
 | P1 Machine | **Primary caches** | *On*; *Off* runs uncached and is only useful for debugging |
 | P2 Video | **Display** | *Graphics* (Newport) or *Serial console*: with no graphics board the PROM and IRIX use the serial console on the MiSTer's UART pins |
 | P2 Video | **Aspect ratio** | how the scaler fits the picture |
