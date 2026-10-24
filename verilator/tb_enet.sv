@@ -292,11 +292,36 @@ initial begin
     m_write(9'h103, seq, 32'h1);      // stop RX on a snapshot older than a TX write
     gr(RX_CTRL, v); check("an RX stop survives a TX write", v[9] == 1'b0);
     m_rd1(9'h100, st); seq = st[15:0];
-    gw(RX_RESET, 32'h0);              // RESET is both channels'
+    gw(RX_RESET, 32'h1);              // a channel reset is both channels'
     m_write(9'h17, seq, 32'h0800_7000);
-    gr(TX_NBDP, v); check("RESET counts on TX too", v == 32'h0800_6000);
+    gr(TX_NBDP, v); check("a channel reset counts on TX", v == 32'h0800_6000);
     m_write(9'h18, seq, 32'h0812_3600);
     gr(CRBDP, v); check("...and on RX", v != 32'h0812_3600);
+    gw(RX_RESET, 32'h0);
+
+    $display("E11 writes that do not move Main's bookkeeping");
+    gw(RX_NBDP, 32'h0812_3700);
+    gw(RX_CTRL, 32'h0000_0200);       // RX running, CRBDP = 0x08123700
+    m_rd1(9'h100, st); seq = st[15:0];
+    gw(RX_RESET, 32'h2);              // CLRINT, as on every interrupt
+    m_write(9'h18, seq, 32'h0812_3710);
+    gr(CRBDP, v); check("CLRINT does not drop Main's CRBDP", v == 32'h0812_3710);
+    gw(RX_CTRL, 32'h0000_0400);       // AMASK set: ACTIVE untouched
+    m_write(9'h18, seq, 32'h0812_3720);
+    gr(CRBDP, v); check("a CTRL write with AMASK set does not", v == 32'h0812_3720);
+    m_rd1(9'h100, st);
+    begin
+        logic [2:0] sc0;
+        sc0 = st[23:21];
+        gw(seeq(6), 32'h3E);          // RX command
+        m_write(9'h18, seq, 32'h0812_3730);
+        gr(CRBDP, v); check("a SEEQ write does not", v == 32'h0812_3730);
+        m_rd1(9'h100, st); check("...but counts in STATE[23:21]", st[23:21] == sc0 + 3'd1);
+    end
+    gw(RX_CTRL, 32'h0000_0000);       // a stop does move it
+    m_write(9'h18, seq, 32'h0812_3740);
+    gr(CRBDP, v); check("a CTRL write that writes ACTIVE does", v == 32'h0812_3730);
+
 
     $display("\n== tb_enet: %0d checks, %0d failed ==", checks, fails);
     $display("ENET: %s", fails ? "FAIL" : "PASS");
