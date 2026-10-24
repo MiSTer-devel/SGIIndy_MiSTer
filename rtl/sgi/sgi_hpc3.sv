@@ -348,7 +348,13 @@ module sgi_hpc3 #(
     logic        e_rst, e_loop;             // RESET bits 0 and 2, as written
     logic        e_dmairq;                  // a descriptor's XIE, raised by Main
     logic        e_nocarr = 1'b1;           // SEEQ reg 5 bit 1, from Main
-    logic [15:0] e_seq = 16'd0;             // the guest's writes to the window
+    // The guest's writes to the window, counted PER CHANNEL. One count for
+    // both (build 53) dropped Main's RX bookkeeping - CRBDP after frames it
+    // had already handed back in memory - every time the driver queued an
+    // ACK on TX in between, and the receive ring fell out of step with the
+    // driver: IRIX panicked in its allocator under an FTP upload.
+    logic  [7:0] rx_seq = 8'd0;             // RX's registers, its CRBDP, the SEEQ
+    logic  [7:0] tx_seq = 8'd0;             // TX's registers and pointer pair
     // The SEEQ interrupts on a NEW status its command enables, and HPC3 on a
     // descriptor's XIE (IRIS seeq8003.rs raise_interrupt).
     wire rx_irq = !rx_stat[7] && |(rx_cmd[4:0] & rx_stat[4:0]);
@@ -382,7 +388,13 @@ module sgi_hpc3 #(
     // Every store word the guest's writes to the window land in: the four
     // descriptor pairs from 0x14000, the two control groups, the SEEQ.
     function automatic logic enet_ix(input logic [7:0] i);
-        enet_ix = (i[7:3] == 5'b00010) || (i[7:4] == 4'hD) || (i[7:5] == 3'b010);
+        enet_ix = (i >= 8'h14 && i <= 8'h1B) || (i[7:4] == 4'hD) || (i[7:5] == 3'b010);
+    endfunction
+    // ...and which channel's: TX's descriptor pair (0x16/0x17), its pointer
+    // pair (0x1A/0x1B) and its control group (0xD8-0xDF); the rest is RX's.
+    // RESET (0xD5) is both channels', so it counts on both.
+    function automatic logic tx_ix(input logic [7:0] i);
+        tx_ix = (i[7:1] == 7'h0B) || (i[7:1] == 7'h0D) || (i[7:3] == 5'h1B);
     endfunction
 
     // Read addresses: the bus's access, or the window's own when it is the
@@ -692,7 +704,12 @@ module sgi_hpc3 #(
     logic  [8:0] ex_ix;
     logic [15:0] ex_sq;
     logic [31:0] ex_wd;
-    wire         ex_ok = (ex_sq == e_seq);
+    // Main's snapshot carries both counts; a write is checked against the
+    // count of the channel it belongs to.
+    wire         ex_rx_ok = (ex_sq[7:0]  == rx_seq);
+    wire         ex_tx_ok = (ex_sq[15:8] == tx_seq);
+    wire         ex_ok    = !enet_ix(ex_ix[7:0]) ? (ex_rx_ok && ex_tx_ok)
+                          : tx_ix(ex_ix[7:0])    ? ex_tx_ok : ex_rx_ok;
 
     // A start, from this access's halves.
     wire  [7:0] ix0 = st_idx(1'b0), ix1 = st_idx(1'b1);
@@ -707,7 +724,7 @@ module sgi_hpc3 #(
 
     // Main's live registers.
     function automatic logic [31:0] ex_live(input logic [8:0] i);
-        if (i == 9'h100)      ex_live = {8'hEC, 3'b000, e_rst, e_loop, enet_irq, tx_act, rx_act, e_seq};
+        if (i == 9'h100)      ex_live = {8'hEC, 3'b000, e_rst, e_loop, enet_irq, tx_act, rx_act, tx_seq, rx_seq};
         else if (i == 9'h105) ex_live = {tx_cmd, rx_cmd, tx_stat, rx_stat};
         else                  ex_live = 32'h0;
     endfunction
@@ -824,7 +841,10 @@ module sgi_hpc3 #(
                     // ---- the guest's side of the Ethernet window
                     for (int w = 0; w < 2; w++) begin
                         if (w ? acc_wr1 : acc_wr0) begin
-                            if (enet_ix(w ? ix1 : ix0)) e_seq <= e_seq + 16'd1;
+                            if (enet_ix(w ? ix1 : ix0)) begin
+                                if (tx_ix(w ? ix1 : ix0) || (w ? ix1 : ix0) == IX_RX_RESET) tx_seq <= tx_seq + 8'd1;
+                                if (!tx_ix(w ? ix1 : ix0))                                   rx_seq <= rx_seq + 8'd1;
+                            end
                             if (blk == BLK_SEEQ && {addr[4:3], w[0]} == 3'd6) rx_cmd <= st_wv[w][7:0];
                             if (blk == BLK_SEEQ && {addr[4:3], w[0]} == 3'd7) tx_cmd <= st_wv[w][7:0];
                             if ((w ? ix1 : ix0) == IX_RX_CTRL && !st_wv[w][10]) rx_act <= st_wv[w][9];
@@ -899,9 +919,9 @@ module sgi_hpc3 #(
                     if (ex_w) begin
                         if (ex_ix == 9'h101) rx_stat <= ex_wd[7:0];
                         if (ex_ix == 9'h102) tx_stat <= ex_wd[7:0];
-                        if (ex_ix == 9'h103 && ex_ok) begin
-                            if (ex_wd[0]) rx_act <= 1'b0;
-                            if (ex_wd[1]) tx_act <= 1'b0;
+                        if (ex_ix == 9'h103) begin
+                            if (ex_wd[0] && ex_rx_ok) rx_act <= 1'b0;
+                            if (ex_wd[1] && ex_tx_ok) tx_act <= 1'b0;
                         end
                         if (ex_ix == 9'h104) begin
                             if (ex_wd[0]) e_dmairq <= 1'b1;
