@@ -17,13 +17,11 @@ programs drawn by a reimplementation of the Newport (XL) graphics board.
 | **Memory** | 32, 48, 64 or 128 MB |
 | **Storage** | the WD33C93 SCSI controller with two disks (SCSI IDs 1 and 2) and a CD-ROM drive (SCSI ID 6), all as image files on the SD card |
 | **Clock** | the Dallas DS1386 real-time clock, set from the MiSTer's clock at every start |
-| **Network** | the integral Ethernet (`ec0`, SEEQ 80C03 behind HPC3) on the MiSTer's eth0, eth1, a macvlan or tap0 (OSD *Network interface*); IRIX pings, telnets and FTPs. Needs a Main_MiSTer with the SGI Indy support (`support/sgi`, not yet in the official MiSTer) |
+| **Network** | the integral Ethernet (`ec0`, SEEQ 80C03 behind HPC3) on the MiSTer's eth0, eth1, a macvlan or tap0 (OSD *Network interface*); IRIX pings, telnets and FTPs at about 2.3 MB/s each way. Needs a Main_MiSTer with the SGI Indy support (`support/sgi`, not yet in the official MiSTer) |
 | **Sound** | the HAL2 audio processor fed by HPC3's PBUS DMA: the PROM's startup chime, and IRIX's audio (`kdsp_a2`) at 48 kHz stereo through the MiSTer's audio output, with IRIX's volume control |
 
 ### Not there yet
 
-- **Network speed**: sending from the Indy is slow (50-140 KB/s under FTP);
-  receiving runs at about 2 MB/s.
 - **Sound input and digital audio**: the analogue and AES inputs record
   silence, and the AES output goes nowhere.
 - **Saved PROM settings**: the PROM's environment (`setenv`) is not kept when

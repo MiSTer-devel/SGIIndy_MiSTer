@@ -1,11 +1,11 @@
 # Ethernet for the Indy core - design
 
-Status: **working on the board** (2026-10-23, build 53b + Main_MiSTer `sgi-indy`
-52772a9): IRIX 5.3's `ec0` on the MiSTer's eth0 pings both ways and moves
-files by FTP md5-identical in both directions (section 8, Phase 3). The window
-is `rtl/sgi/sgi_hpc3.sv` + `rtl/mister/sgi_enet_uio.sv` + `ext_inval` in
-`ram_arb.sv` + the OSD row (513 ALMs); `tb_enet` 46 checks. Open: transmit
-speed, and the OSD's other interfaces (only eth0 tried). It replaces the 2026-09-27
+Status: **working on the board** (2026-10-24, build 53c + Main_MiSTer `sgi-indy`
+f6e7582): IRIX 5.3's `ec0` on the MiSTer's eth0 pings both ways and moves
+files by FTP md5-identical in both directions at about 2.3 MB/s (section 8,
+Phase 3). The window is `rtl/sgi/sgi_hpc3.sv` + `rtl/mister/sgi_enet_uio.sv` +
+`ext_inval` in `ram_arb.sv` + the OSD row (~330 ALMs over build 52); `tb_enet`
+51 checks. Open: the OSD's other interfaces (only eth0 tried). It replaces the 2026-09-27
 draft, which put the SEEQ and both HPC3 Ethernet DMA engines in the FPGA
 behind a NeXT-style frame mailbox (~1,500-2,100 ALMs, *estimate*). This
 revision puts the chip on the ARM and keeps only a register window in the
@@ -219,7 +219,16 @@ One build in flight at a time; all fits on m900. Core work on
   boot, 691 frames received before login; ping m900 and the PC both ways;
   FTP from the PC (IRIX ftpd, `guest` with a password set): `/unix` 3,173,840
   bytes md5 = the image's at 137 KB/s, 2 MB up at 2.3 MB/s and back md5
-  identical at 56 KB/s; `netstat` 4,223 in / 4,342 out, no errors.* Main built and deployed to .143; IRIX by hand with
+  identical at 56 KB/s; `netstat` 4,223 in / 4,342 out, no errors.*
+* *Transmit speed (build 53c, 2026-10-24).* Main polls the window ~17,000
+  times a second, so transmit was never waiting on Main: it was waiting on
+  ACKs. The driver writes RESET (CLRINT) on every interrupt, and that counted
+  as a window change, so Main's `CRBDP` updates were dropped and the receive
+  ring stalled until it wrapped (`rx_run` ~25,000 calls per 2 s for ~200
+  frames). Only writes that move Main's bookkeeping count now (descriptor and
+  pointer registers, a CTRL write of ACTIVE, a RESET of bit 0 or 2); the SEEQ
+  has its own count. FTP from the PC: `/unix` from the Indy 2,344 KB/s (was
+  137-190), 2 MB up 2,146 KB/s, back 2,136 KB/s (was 56-185), md5 identical. Main built and deployed to .143; IRIX by hand with
   misterkvms: `ifconfig ec0`, ping the MiSTer over tap0, ftp a file of known
   checksum both ways, then macvlan to a LAN host; every OSD choice; plus
   disk check, cpu-tests and audio as usual.
