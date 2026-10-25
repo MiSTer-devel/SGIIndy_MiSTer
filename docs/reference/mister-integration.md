@@ -7,21 +7,20 @@ the SCSI images, the keyboard, the mouse and the clock, the SCC on the board's
 UART, and VC2's raster to the scaler. This is how each of those is wired, and
 why.
 
-The current release is `releases/SGIIndy_20261023.rbf` (build 51, dated
-261023) with `releases/boot.rom`: the computer-core OSD standard (pages,
-settings latched at reset, *Changes pending*, Swap Alt/Win keys), up to 128 MB
-of memory, OSD resets that no longer fail POST's keyboard-controller test, and
-the keyboard in scan-code set 3 when IRIX asks for it (Ctrl, Alt and Caps Lock
-right under IRIX), on top of build 50's IRIX 6.2/6.5 install and IRIX menus.
-The framework's YC/composite output is left out (it cannot carry this raster).
+The current release is `releases/SGIIndy_20261025.rbf` (build 54, dated
+261025) with `releases/boot.rom`: Ethernet (`ec0` on the MiSTer's network) and
+disk writes buffered by Main_MiSTer in place of the FPGA's SCSI block cache,
+on top of build 51b. Both need a Main_MiSTer with the SGI Indy support
+(`support/sgi`).
 It was built with Quartus Prime Lite 17.0.2 **on the Linux build machine
-(m900)** at fitter seed 3, the seed `sgiindy.qsf` keeps: 37,094 of 41,910
-ALMs (89 %), 493 of 553 M10K blocks, 61 of 112 DSP blocks, and timing met in
-every check - worst setup slack +1.521 ns on the 50 MHz core clock and
-+0.201 ns on the HDMI pixel clock. `SEED=3 BUILD_DATE=261023 bash scripts/build.sh` on that machine
+(m900)** at fitter seed 3, the seed `sgiindy.qsf` keeps: 35,660 of 41,910
+ALMs (85 %), 397 of 553 M10K blocks, 61 of 112 DSP blocks, and timing met in
+every check - worst setup slack +1.349 ns on the 50 MHz core clock and
++0.233 ns on the HDMI pixel clock. `SEED=3 BUILD_DATE=261025 bash scripts/build.sh` on that machine
 rebuilds it; Quartus on Windows places the same inputs differently, so a
 bitstream is only bit-identical on the machine that built it. The earlier
-releases, `SGIIndy_20260928.rbf` (build 50, seed 5, m900),
+releases, `SGIIndy_20261023.rbf` (build 51b: the OSD standard, 128 MB, the
+keyboard fixes; seed 3, m900), `SGIIndy_20260928.rbf` (build 50, seed 5, m900),
 `SGIIndy_20260927.rbf` (build 48, seed 5, m900) and `SGIIndy_20260918.rbf`
 (build 44, seed 1, built on Windows), stay in `releases/` beside it. `scripts/build.sh` writes that report into `reports/` after every
 compile; [deploy-and-debug.md](deploy-and-debug.md#building) has the flow.
