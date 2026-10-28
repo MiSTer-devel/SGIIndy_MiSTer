@@ -43,11 +43,13 @@
 //  frame is what Main does today; a ranged invalidate is the obvious follow-up
 //  if the network ever matters as much as the cache.
 //
-//  A HIT TAKES ONE RAM LATENCY. Tag and data RAMs both have registered
-//  outputs; the tag is known two clocks after the request and the first word
-//  is presented in that same clock, the other three one a clock after. A miss
-//  is issued to the port in that clock too - two clocks later than it would
-//  have been, against the ~20 it is about to spend.
+//  A HIT TAKES ONE RAM LATENCY. The tag and the first word come straight off
+//  the RAMs' outputs the clock after the request (build 57; build 56 had a
+//  register behind each and measured a hit at ~7 clocks on the bus, which with
+//  84 % of instruction fills hitting was the clock worth taking), the other
+//  three words one a clock after. A miss is issued to the port in that same
+//  clock - one later than it would have been, against the ~20 it is about to
+//  spend.
 //
 //  Bench: `make -C verilator l2test` (tb_ramarb_pf.cpp driving ram_arb and
 //  this together against a slow memory); the whole-machine simulation runs it
@@ -109,19 +111,17 @@ module l2_cache #(
     logic [63:0]        data_mem [NLINES * 4];
 
     logic [IDX_BITS-1:0] tag_rd_addr, tag_wr_addr;
-    logic [TAG_BITS:0]   tag_wr_data, tag_q, tag_q2;
+    logic [TAG_BITS:0]   tag_wr_data, tag_q;
     logic                tag_we;
     logic [IDX_BITS+1:0] data_rd_addr, data_wr_addr;
-    logic [63:0]         data_wr_data, data_q, data_q2;
+    logic [63:0]         data_wr_data, data_q;
     logic                data_we;
 
     always_ff @(posedge clk) begin
         if (tag_we) tag_mem[tag_wr_addr] <= tag_wr_data;
         tag_q  <= tag_mem[tag_rd_addr];
-        tag_q2 <= tag_q;
         if (data_we) data_mem[data_wr_addr] <= data_wr_data;
-        data_q  <= data_mem[data_rd_addr];
-        data_q2 <= data_q;
+        data_q <= data_mem[data_rd_addr];
     end
 
     // ---- the request ---------------------------------------------------------
@@ -132,7 +132,7 @@ module l2_cache #(
     // flags need no owner check.
     wire                 is_fill = enable && !up_we && (up_burst == 4'd4) && (up_ifill || up_dfill);
 
-    typedef enum logic [2:0] { S_IDLE, S_T1, S_T2, S_HIT, S_FILL, S_WL } state_t;
+    typedef enum logic [2:0] { S_IDLE, S_T1, S_HIT, S_FILL, S_WL } state_t;
     state_t state;
 
     logic        pend;           // a request arrived while busy
@@ -162,17 +162,17 @@ module l2_cache #(
     wire busy = (state != S_IDLE) || pt;
     wire go   = (up_req || pend) && !busy;
 
-    wire hit  = tag_q2[TAG_BITS] && (tag_q2[TAG_BITS-1:0] == r_tag) && r_swept;
-    wire at_t2 = (state == S_T2);
+    wire hit  = tag_q[TAG_BITS] && (tag_q[TAG_BITS-1:0] == r_tag) && r_swept;
+    wire at_t1 = (state == S_T1);
 
     // A fill decided this clock: answered here, or fetched.
-    wire fill_hit  = at_t2 && r_fill && hit;
-    wire fill_miss = at_t2 && r_fill && !hit;
+    wire fill_hit  = at_t1 && r_fill && hit;
+    wire fill_miss = at_t1 && r_fill && !hit;
     wire [IDX_BITS-1:0] cur_idx = cur_line[IDX_BITS-1:0];
     wire [TAG_BITS-1:0] cur_tag = cur_line[LINE_BITS-1:IDX_BITS];
     wire fill_word = (state == S_FILL) && dn_ack;
 
-    // ---- the port: pass-throughs the same clock, a miss from S_T2 ----------
+    // ---- the port: pass-throughs the same clock, a miss from S_T1 ----------
     assign dn_req    = (go && !is_fill) || fill_miss;
     assign dn_we     = up_we;
     assign dn_addr   = up_addr;
@@ -190,7 +190,7 @@ module l2_cache #(
     assign up_last  = pt ? dn_last
                     : (state == S_HIT) ? (beat == 2'd3)
                     : (fill_word && fline == 2'd0 && beat == 2'd3);
-    assign up_rdata = (fill_hit || state == S_HIT) ? data_q2 : dn_rdata;
+    assign up_rdata = (fill_hit || state == S_HIT) ? data_q : dn_rdata;
 
     // ---- RAM ports -----------------------------------------------------------------
     // Reads: a fill's four words issued on consecutive clocks from `go`, a
@@ -200,8 +200,7 @@ module l2_cache #(
         data_rd_addr = {idx, up_we ? up_addr[4:3] : 2'b00};
         case (state)
             S_T1:    data_rd_addr = {r_idx, 2'd1};
-            S_T2:    data_rd_addr = {r_idx, 2'd2};
-            S_HIT:   data_rd_addr = {r_idx, 2'd3};
+            S_HIT:   data_rd_addr = {r_idx, beat + 2'd1};   // beat 1 reads word 2, beat 2 word 3
             default: ;
         endcase
     end
@@ -210,15 +209,15 @@ module l2_cache #(
     // line write's four words. Never two in one clock: the state machine
     // serialises every transaction.
     wire [63:0] merged = {
-        r_be[7] ? r_wdata[63:56] : data_q2[63:56],
-        r_be[6] ? r_wdata[55:48] : data_q2[55:48],
-        r_be[5] ? r_wdata[47:40] : data_q2[47:40],
-        r_be[4] ? r_wdata[39:32] : data_q2[39:32],
-        r_be[3] ? r_wdata[31:24] : data_q2[31:24],
-        r_be[2] ? r_wdata[23:16] : data_q2[23:16],
-        r_be[1] ? r_wdata[15:8]  : data_q2[15:8],
-        r_be[0] ? r_wdata[7:0]   : data_q2[7:0] };
-    wire wr_hit = at_t2 && r_we && hit;
+        r_be[7] ? r_wdata[63:56] : data_q[63:56],
+        r_be[6] ? r_wdata[55:48] : data_q[55:48],
+        r_be[5] ? r_wdata[47:40] : data_q[47:40],
+        r_be[4] ? r_wdata[39:32] : data_q[39:32],
+        r_be[3] ? r_wdata[31:24] : data_q[31:24],
+        r_be[2] ? r_wdata[23:16] : data_q[23:16],
+        r_be[1] ? r_wdata[15:8]  : data_q[15:8],
+        r_be[0] ? r_wdata[7:0]   : data_q[7:0] };
+    wire wr_hit = at_t1 && r_we && hit;
     always_comb begin
         data_we      = 1'b0;
         data_wr_addr = {cur_idx, beat};
@@ -319,9 +318,7 @@ module l2_cache #(
                     if (is_fill || up_we) state <= S_T1;
                 end
 
-                S_T1: state <= S_T2;
-
-                S_T2: begin
+                S_T1: begin
                     beat <= 2'd1;
                     if (r_fill) begin
                         if (hit) state <= S_HIT;
