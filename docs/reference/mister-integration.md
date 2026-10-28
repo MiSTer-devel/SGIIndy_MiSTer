@@ -311,7 +311,10 @@ the scaler does.
 
 **Aspect ratio.** *Original* is 5:4, because the Indy's own monitor was
 1280×1024 and the PROM's boot screen is drawn for it; *Full Screen* and the
-two custom ratios are the framework's.
+two custom ratios are the framework's. **Scale** is the framework's
+`video_freak`: it measures the 1280×1024 window from `VGA_DE` and asks the
+scaler for a whole multiple of it - 1x at 1080p and 1440p (the desktop pixel
+for pixel, centred), 2x at 2160p; below 1024 lines it falls back to the ratio.
 
 **The refresh is 27.9 Hz because a pixel is one core clock.** Sixty hertz would
 need the table's own 107.5 MHz pixel clock — VC2's generator in a clock domain
@@ -347,6 +350,7 @@ keeps the settings in `SGIINDY_v1.CFG`.
 | P1 | Primary caches: On / Off | `O[11]` | both primary caches, for bisecting a fault onto them without a rebuild |
 | P2 | Display: Graphics / Serial console | `O[10]` | whether Newport answers on the bus. **Fitting it moves the console off the serial port**: ARCS installs a DisplayController with `ConsoleOut\|Output` and the PROM stops printing to the SCC, so *Serial console* is a real machine configuration, not a degraded mode |
 | P2 | Aspect ratio | `O[122:121]` | Original (5:4), Full Screen, and the two custom ratios |
+| P2 | Scale: Normal / V-Integer / Narrower HV-Integer / Wider HV-Integer | `O[124:123]` | the framework's integer scaling; acts at once, outside *Changes pending* |
 | P3 | Swap Alt/Win keys: No / Yes | `O[23]` | swaps set 2's left Alt (`11`) with left Win (`E0 1F`) and right Alt (`E0 11`) with right Win (`E0 27`) on the way into the i8042, which translates to set 3 when the guest asks for it (IRIX does); acts at once |
 | P4 | Audio: On / Off | `O[18]` | Off makes HAL2 report itself absent |
 | P9 | Video debug: Off / Raw index | `O[14]` | shows the frame buffer's colour index as grey with CMAP taken out of the path (the cursor as white), and a line-cache miss as index `0x80` |

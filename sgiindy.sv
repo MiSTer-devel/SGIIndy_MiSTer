@@ -149,6 +149,9 @@ localparam CONF_STR = {
 	// gfx_present below), so this is the standard's "display source".
 	"P2O[10],Display,Graphics,Serial console;",
 	"P2O[122:121],Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
+	// Read from `status`, not `cfg`: it only changes the scaler's output size,
+	// so it acts at once and is never pending (see VIDEO below).
+	"P2O[124:123],Scale,Normal,V-Integer,Narrower HV-Integer,Wider HV-Integer;",
 
 	"P3O[23],Swap Alt/Win keys,No,Yes;",
 
@@ -217,8 +220,6 @@ wire osd_pending = {status[22:18], status[16:10], status[122:121]}
 // 1280x1024 is 5:4. The Indy's own monitor was 5:4 and the PROM's boot screen
 // is drawn for it, so that is what "Original" means here.
 wire [1:0] ar = cfg[122:121];
-assign VIDEO_ARX = (!ar) ? 12'd5 : (ar - 1'd1);
-assign VIDEO_ARY = (!ar) ? 12'd4 : 12'd0;
 
 wire        ioctl_download;
 wire [15:0] ioctl_index;
@@ -1146,7 +1147,19 @@ end
 // FRAME RATE. See the header, and docs/reference/mister-integration.md.
 assign CLK_VIDEO = clk_sys;
 assign CE_PIXEL  = vid_ce_pix;
-assign VGA_DE = vid_de;
+
+// INTEGER SCALING is the framework's video_freak: it measures the visible
+// window (1280 x 1024) from VGA_DE and turns the aspect ratio into an output
+// size. 1024 lines go into 1080 once, so V-Integer at 1080p is the desktop
+// pixel for pixel, centred, and 2160p gives exactly 2x. No crop: VGA_DE is
+// vid_de unchanged.
+video_freak video_freak
+(
+	.CLK_VIDEO, .CE_PIXEL, .VGA_VS, .HDMI_WIDTH, .HDMI_HEIGHT, .VGA_DE, .VIDEO_ARX, .VIDEO_ARY,
+	.VGA_DE_IN(vid_de),
+	.ARX((!ar) ? 12'd5 : 12'(ar - 1'd1)), .ARY((!ar) ? 12'd4 : 12'd0),
+	.CROP_SIZE(12'd0), .CROP_OFF(5'd0), .SCALE({1'b0, status[124:123]})
+);
 assign VGA_HS = vid_hsync;
 assign VGA_VS = vid_vsync;
 assign VGA_R  = vid_r;

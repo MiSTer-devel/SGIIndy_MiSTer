@@ -100,6 +100,7 @@ settings (so does any other reset). Shut IRIX down first - see below.
 | P1 Machine | **Primary caches** | *On*; *Off* runs uncached and is only useful for debugging |
 | P2 Video | **Display** | *Graphics* (Newport) or *Serial console*: with no graphics board the PROM and IRIX use the serial console on the MiSTer's UART pins |
 | P2 Video | **Aspect ratio** | how the scaler fits the picture |
+| P2 Video | **Scale** | *Normal* scales to the screen at the aspect ratio; *V-Integer* and the two *HV-Integer* modes show the 1280x1024 desktop at a whole multiple (1x at 1080p and 1440p, 2x at 2160p). Acts at once |
 | P3 Input | **Swap Alt/Win keys** | *Yes* swaps the left and right Alt and Win keys |
 | P4 Audio | **Audio** | *On* fits the HAL2 audio processor. *Off* makes the machine report no audio hardware, so the PROM plays no chime and IRIX loads no audio driver |
 
