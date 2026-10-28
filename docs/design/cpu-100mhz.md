@@ -1,6 +1,6 @@
 # A 100 MHz CPU - plan
 
-Status: **stopped after steps 0 and 1a** (2026-10-28) - section 8 has the
+Status: **stopped after steps 0 and 1a** (2026-10-28; the memory side went first: the second-level cache of docs/design/cache-fill-latency.md section 9 = build 56, then the fill-path trims) - section 8 has the
 measurements. The CPU's paths are logic-bound at ~11 ns median, and placement
 under a 10 ns constraint recovers half a nanosecond; closing 10 ns means
 re-pipelining the execute stage, which section 7's last line said would end

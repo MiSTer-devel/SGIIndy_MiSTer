@@ -118,6 +118,10 @@ rsh "sleep 90"
 say "halting"
 ws "text:init 0" "sleep:0.3" "kbdRaw:28"
 rsh "sleep 75"
+# Pushed again here: the OSD launcher reboots the board, and the reboot empties
+# /tmp - build 56's first run typed its sums and halted, then found no checker.
+rsh "mkdir -p $TMPD"
+for f in tools/misterdeploy/efsread.py tools/misterdeploy/sumcheck.py tools/misterdeploy/efsdiff.py; do pusht "$f" || exit 1; done
 rep "---- sumcheck on the board ----"
 rsh "cd $TMPD; python3 sumcheck.py '$IMG' $SUMS $SRC $COPY $FILES" 2>&1 | tee -a "$OUT"
 grep -q "^DISKCHECK " "$OUT" || { rep "DISKCHECK NO VERDICT (the checker printed nothing)"; exit 1; }

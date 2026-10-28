@@ -414,3 +414,29 @@ request ram_arb remembered for the second level being issued later with the
 other master's payload (ram_arb's port muxes followed `dma_go`, one clock
 wide - now the owner for the whole transaction). cpu-tests 2259/0 (246
 tests), run-prom, the IRIX 5.3 sim boot, both ram_arb benches.
+
+**On the board** (.143, 2026-10-28, build 56 seed 2 `a3553be1` against the same
+night's build 54 = SGIIndy_20261025, pristine IRIX 5.3 image, perfprobe):
+
+| | build 54 | **build 56** | |
+|---|---:|---:|---|
+| 60 x `/bin/ls /` | 3.57 s | **3.12 s** | 1.15x |
+| perl 200k loop | 11.55 s | **11.03 s** | 1.05x |
+| `bzip2 -9` of /unix | 79.6 s | **74.7 s** | 1.07x |
+| `ls -lR` into the Console | 5.05 s | **4.78 s** | 1.06x |
+| xterm start | 0.716 s | **0.686 s** | 1.04x |
+| rawdisk, xdpyinfo, launch to the X login (82 s) | same | same | not memory-bound |
+| clocks per instruction: fork / perl / bzip2 / scroll | 1.40 / 1.54 / 1.77 / 1.51 | **1.38 / 1.51 / 1.68 / 1.48** | |
+| an instruction fill, clocks on the bus | 13.1-13.5 | **9.4-11.4** | |
+| a data fill, clocks on the bus | 18.3-18.7 | **9.7-14.4** | |
+| the CPU's share of the DDR3 port (bzip2 / perl) | 16.3 % / 6.2 % | **7.7 % / 2.1 %** | |
+| fills answered on chip, whole workload window | 46 % of I (buffers) | **84.4 % of I, 53.4 % of D** | |
+
+The instruction side landed exactly where the replay put it (84.4 % against
+84.1 %); the data side at 53 % is the desktop, not the boot. Fit: 36,052 ALMs
+(86 %), 533 of 553 M10Ks (Quartus gave the data array 128 blocks, not the 104
+it could be), core +0.122 ns, HDMI +0.215 (seed 2; seed 3 missed HDMI by
+0.083). What is left in a HIT is now the point: with 84 % of instruction fills
+answered in ~7 clocks on the bus, the three clocks in front of `mem_request`,
+the registered RAM outputs (the tag could decide one clock earlier) and
+`S_FILLEND` (§7) are each worth more than they were when every fill paid 20.
