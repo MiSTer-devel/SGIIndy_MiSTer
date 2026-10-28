@@ -1,9 +1,12 @@
 # A 100 MHz CPU - plan
 
-Status: **plan only, nothing built** (2026-10-24). Every figure comes from
-earlier fits and board counters, cited where it is used. Numbers marked
-*estimate* are estimates. The first step (section 6) is a timing report that
-replaces the guesses in section 4.3 with a measured list.
+Status: **stopped after steps 0 and 1a** (2026-10-28) - section 8 has the
+measurements. The CPU's paths are logic-bound at ~11 ns median, and placement
+under a 10 ns constraint recovers half a nanosecond; closing 10 ns means
+re-pipelining the execute stage, which section 7's last line said would end
+the plan. The CPU stays at 50 MHz. Sections 1-7 are the plan as written on
+2026-10-24. Every figure comes from earlier fits and board counters, cited
+where it is used. Numbers marked *estimate* are estimates.
 
 ## 1. Goal
 
@@ -136,3 +139,59 @@ One build at a time, each read before the next.
   timeout - halves in real time; read for it in step 1.
 * If step 1 cannot reach 10 ns there is no cheap middle: the plan stops, and
   the CPU stays at 50 MHz.
+
+## 8. Measured (2026-10-28): why it stops
+
+**Step 0.** `quartus_sta` on build 54's database (seed 3, fitted for 20 ns),
+every register-to-register path inside `u_cpu`, slack re-read against 10 ns:
+**5,694 endpoints fail**, worst needs 17.3 ns. By logic alone (cell delay,
+placement-independent): the one-clock 64x64 multiplier (9.9 ns, 47 levels),
+the execute stage's `resultData -> forward mux -> address add -> region
+decode -> D-cache index / mini-TLB / stall3` (5.7-6.5 ns, 17-25 levels), the
+TLB read-out `COP0_0_INDEX_tlbEntry -> TLB_fetchAddrOut` (6.2 ns, 29 levels).
+Everything else is 2-5 ns of cells under 8-12 ns of routing, so the open
+question was how much of that routing a real 10 ns constraint would remove.
+
+**Step 1a, the experiment.** The same RTL fitted once more with
+`set_max_delay 10` on every CPU-internal path (SDC edit on the build machine
+only). Placement moved by **0.48 ns on average** over 1,842 paths common to
+both reports; **5,719 endpoints still fail**, worst -6.7 ns, median failing
+data delay 11.5 ns over ~8 logic levels - on this speed grade ~8 LUT levels
+is 10 ns, so these are depth, not slack. The failing set by root:
+
+| root | failing endpoints | what it is | fix class |
+|---|---:|---|---|
+| `stall1` -> `TLBSH_*` | 2,352 | write enables of the 48-entry shadow TLB | a one-clock-late TLB write (cheap, hazard-covered) |
+| `resultWriteEnable`/`resultData` -> execute | ~700 | forward mux -> adder/ALU/compare -> `PC`, `TLB_fetchAddrIn`, `resultData`, `mem1_address`, D-cache index: 11-17 levels, median 13.7 ns | **re-pipeline the execute stage** |
+| fetch: `FetchAddr1` mux -> `TLB_instrMapped` -> `FetchIndexPhys` -> MLAB tag -> compare -> `stall1`/`instrcache_fill` | ~100 | the single-cycle I-cache hit on every instruction, 14-15 levels | restructure the fetch (speculative index + verify) |
+| `mul2 -> prod` | 103 | the 64x64 multiply in one stage | rebalanced (below) |
+| exception address -> BadVAddr/EntryHi/Context/XContext | ~140 | forward mux + adder fanning into four 64-bit registers | capture one clock late (below) |
+| the rest | ~2,300 | FPU divider/shifter, hi/lo, decode-gated enables, RAM address registers, TLB state machines | dozens of individual cuts |
+
+There is no cheap middle either. From the same report, CPU-internal
+endpoints failing at other periods: 90 MHz 4,536; **80 MHz 1,676; 75 MHz
+857**; 70 MHz 484; **60 MHz 2**. A 1.5:1 clock would need KI's mailbox
+(~7 clocks per access, docs/39) and still leave ~850 paths to cut.
+
+**What was built and kept out of the branch.** Two of the logic-bound items
+were rewritten as behaviour-preserving changes and passed the sim gates
+(cpu-tests 2259/0 on 246 tests, same as the baseline; run-prom; the IRIX 5.3
+sim boot): `prim/cpu_mul.vhd` rebalanced into partial products + sum within
+its two stages (the FPU reads the product at exactly two clocks), and
+`cpu_cop0.vhd` writing BadVAddr/EntryHi/Context/XContext one clock after the
+exception from a registered address. At 50 MHz they buy nothing - the core
+clock is bound outside the CPU (`mc_gio_dma`/`np_rex3`/`r4300_bus` ->
+`ddr3_mux`, section 2) - so they live as
+`sgi-board-tools/cpu-step1-rtl.patch` for whoever reopens this, not on the
+release branch.
+
+**What reopening would take.** Roughly: the TLB write delay (one day), the
+multiplier and exception capture (done), then the execute stage split into
+address/ALU and cache/TLB halves with the forwarding network moved a stage
+earlier, the fetch restructured around a speculative physical index, and the
+FPU divider/shifter and hi/lo paths cut one by one - each step gated by
+cpu-tests, the IRIX sim boot and a 45-minute fit, with IRIX's own TLB and
+cache hazards as the correctness oracle. That is a new CPU pipeline, not a
+step of this plan. The gain it would buy is still the 1.3-1.5x of section 3.
+The data: `sgi-board-tools/cpu-step0/` and `cpu-exp1/` (paths, levels,
+the Tcl that made them).
