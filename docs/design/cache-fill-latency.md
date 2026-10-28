@@ -440,3 +440,48 @@ it could be), core +0.122 ns, HDMI +0.215 (seed 2; seed 3 missed HDMI by
 answered in ~7 clocks on the bus, the three clocks in front of `mem_request`,
 the registered RAM outputs (the tag could decide one clock earlier) and
 `S_FILLEND` (§7) are each worth more than they were when every fill paid 20.
+
+## 10. IRIS's benchmark suite on the board (builds 54, 56, 57)
+
+Dani asked for IRIS's own benchmark (`../iris/bench`: 46 bare-metal MIPS
+kernels, each checked against a golden checksum, built on the cpu-tests
+harness) on the core rather than in its emulator. It runs: the prebuilt
+`irisbench.elf` in a volume-header image (`mkvh build ... --bootfile irisbnch`,
+voldir names are eight characters) mounted as the system disk, booted from the
+PROM's command monitor with `boot -f dksc(0,1,8)irisbnch` (the autoboot wants
+`sash`, not the header's bootfile). It prints over the SCC, which on this core
+reaches the MiSTer's UART pins and nothing else, so the results are read out of
+guest RAM instead: `tools/misterdeploy/irisbench_results.py` decodes the
+harness's `results[]` table (`ddr3_peek.py` at 0x38000000 + its address; the
+suite is done when the PC parks in `testdev_exit`), `irisbench_compare.py`
+puts builds side by side. CP0 Count is 25 MHz here (PClock/2), the harness
+assumes 100 when it has no host clock, so its own rates would be 4x high.
+
+Same image, same evening, build 54 (SGIIndy_20261025) against the second
+level of §9 as fitted in build 56 (two RAM latencies to a hit) and build 57
+(one): work units per second of Count, every checksum ok.
+
+| kernel | build 54 | build 56 | build 57 | 57/54 |
+|---|---:|---:|---:|---:|
+| int/dhrystone (DMIPS) | 69.6 | 69.6 | 69.6 | 1.000 |
+| fpu/linpack (MFLOPS) | 3.33 | 3.48 | 3.51 | 1.053 |
+| fpu/matmul (Mflop/s) | 3.46 | 3.72 | 3.77 | 1.089 |
+| img/convolve3x3 (px/s) | 401 k | 559 k | 586 k | **1.460** |
+| vid/motion_est (SAD/s) | 12.7 k | 15.6 k | 15.9 k | 1.254 |
+| vid/yuv2rgb (px/s) | 430 k | 521 k | 533 k | 1.239 |
+| codec/lz (B/s) | 286 k | 302 k | 304 k | 1.063 |
+| img/sharpen5x5, rgb2ycbcr, rotate90 | | | | 1.04-1.06 |
+| int/*, fpu/scalar*, mem/latency_l1 (L1-resident) | | | | 1.000 |
+| mem/latency_l2 (256 KB chase), latency_dram (8 MB) | 1.884 M | 1.788 M | 1.823 M | 0.967 |
+| mem/copy, stream_copy/scale/triad | | 0.93-0.96 | | 0.97 |
+| mem/fill | 39.1 M | 37.5 M | 38.9 M | 0.993 |
+
+What it says: code that fits the 128 KB second level gains up to 1.46x, the
+L1-resident kernels are untouched (the sanity check), and anything that streams
+through memory pays the lookup on every miss - two clocks in build 56 (4-7 %),
+one in build 57 (1-3.5 %). The bench's "L2" chase is sized for a 1 MB cache
+(256 KB), so it cannot see ours. The last clock on a miss is the next trim,
+as is the sys/ group, which left no records on any build (the suite exits
+after 40 kernels; its message went to the UART).
+
+Raw tables: `tests/out/hw/irisbench/results{54,56b,57}.bin` (not committed).
