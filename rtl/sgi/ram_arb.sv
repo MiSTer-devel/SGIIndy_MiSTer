@@ -154,6 +154,11 @@ module ram_arb (
     output logic  [7:0] ram_be,
     output logic  [3:0] ram_burst,     // 1..4, or 12 for a prefetching fill
     output logic [191:0] ram_wdata3,
+    // The CPU's fill flags, passed down for l2_cache.sv (build 56): held
+    // with the payload. A DMA transaction never has a burst of 4, so the
+    // second level needs no owner check to trust them.
+    output logic        ram_ifill,
+    output logic        ram_dfill,
     input  logic [63:0] ram_rdata,
     input  logic        ram_ack,
     input  logic        ram_last,
@@ -329,14 +334,21 @@ module ram_arb (
         end
     end
 
+    // THE PAYLOAD STAYS THE OWNER'S FOR THE WHOLE TRANSACTION (build 56), not
+    // just the issue clock: l2_cache.sv may remember a request and issue it
+    // to the real port clocks later, and the first l2test run showed a DMA
+    // write issued that way with the CPU's address, burst and data.
+    wire dma_sel = dma_go | (inflight & owner_dma);
     assign ram_req   = cpu_go_ram | dma_go;
-    assign ram_we    = dma_go ? dma_we    : cpu_we;
-    assign ram_addr  = dma_go ? dma_addr  : cpu_addr;
-    assign ram_wdata = dma_go ? dma_wdata : cpu_wdata;
-    assign ram_be    = dma_go ? dma_be    : cpu_be;
+    assign ram_we    = dma_sel ? dma_we    : cpu_we;
+    assign ram_addr  = dma_sel ? dma_addr  : cpu_addr;
+    assign ram_wdata = dma_sel ? dma_wdata : cpu_wdata;
+    assign ram_be    = dma_sel ? dma_be    : cpu_be;
     // The DMA engines move one word per transaction and have no burst input.
-    assign ram_burst = dma_go ? 4'd1 : pf_new ? 4'd12 : {1'b0, cpu_burst};
+    assign ram_burst = dma_sel ? 4'd1 : pf_new ? 4'd12 : {1'b0, cpu_burst};
     assign ram_wdata3 = cpu_wdata3;          // read only with the CPU's burst
+    assign ram_ifill  = cpu_ifill;
+    assign ram_dfill  = cpu_dfill;
 
     assign cpu_ack     = srv | port_fwd;
     assign cpu_last    = srv    ? (srv_beat == 2'd3)

@@ -182,6 +182,7 @@ localparam CONF_STR = {
 	"P9O[20],DATA IN guard,On,Off;",
 	"P9O[21],I-fetch prefetch,On,Off;",
 	"P9O[22],D-fetch prefetch,On,Off;",
+	"P9O[27],L2 cache,On,Off;",
 `endif
 	"v,1;",
 	"V,v",`BUILD_DATE
@@ -709,6 +710,9 @@ sgi_indy u_core
 	.ipf_enable       (~cfg[21]),
 	// status[22], setopt.sh dpf=off, the data buffer (build 47).
 	.dpf_enable       (~cfg[22]),
+	// status[27], setopt.sh l2=off: the second-level cache (build 56,
+	// rtl/sgi/l2_cache.sv), for the A/B.
+	.l2_enable        (~cfg[27]),
 
 	.dbg_scsi_bcn     (scsi_bcn),
 	.dbg_scsi_stat    (scsi_stat),

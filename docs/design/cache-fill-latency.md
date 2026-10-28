@@ -369,3 +369,48 @@ interpreter lands in the instruction cache (7.5 to 18 instruction fills per
 **Next.** A posted line write in `ram_arb` (acknowledged when latched, the
 next read allowed past it with an address check) would hide the rest of a
 dirty miss; early restart would take ~5 clocks off every fill.
+
+## 9. A second level in block RAM (build 56)
+
+The fewer-trips item of §7, taken literally: `rtl/sgi/l2_cache.sv`, a 128 KB
+direct-mapped cache with 32-byte lines between `ram_arb` and the DDR3 port.
+Write-through, so DDR3 stays current and DMA needs nothing; every write issued
+through the port is merged into the line if it is held; only line fills look
+it up, everything else passes through in the same clock. An instruction fill
+that misses it bursts three lines as the buffer did (§8), a data fill on a
+stream too, and all three land in the cache, so the two buffers are off while
+it is on (`status[27]`, `setopt.sh l2=off`, is the A/B). Main's writes from
+the ARM are the one path around it; its `ext_inval` starts a 4096-clock sweep
+that invalidates every tag, during which a fill may hit only lines the sweep
+has passed and nothing fetched is kept. A hit presents its first word two
+clocks after the request (both RAMs have registered outputs) and one a clock
+after that; a miss is issued to the port in that same second clock.
+
+**The replay first** (`tools/l2sim.c`, the boot's itrace and dtrace through
+L1s as the core has them, then §8's buffers or a second level, interleaved by
+progress): the buffers answer 45.8 % of instruction fills - the board said
+43-48 % - and 59 % of data fills (the board said ~10 %: a boot trace is
+bzero and bcopy, a desktop is not). Behind them:
+
+| second level | I fills answered | D fills answered | DDR3 transactions vs today |
+|---|---:|---:|---:|
+| none (build 48 buffers) | 45.8 % | 59.2 % | 100 % |
+| DM 64 KB | 76.2 % | 81.2 % | 49.5 % |
+| **DM 128 KB** | **84.1 %** | **82.4 %** | **46.4 %** |
+| DM 256 KB | 89.0 % | 83.3 % | 44.0 % |
+| 2 x 64 KB | 87.3 % | 83.1 % | 44.7 % |
+
+128 KB is what fits beside the 397 M10Ks in use (553 on the device): 104 for
+the data in the densest shape - no byte enables, a partial store is read,
+merged and written back - and 8 for the tags. The data side is the figure to
+distrust; the instruction side is why this should show on the board where the
+data buffer did not.
+
+**Benches.** `make -C verilator l2test`: tb_ramarb_pf.cpp through
+`tb_l2_wrap.sv` (ram_arb + a 2 KB second level so the window evicts it)
+against the slow memory, four configurations including one-clock
+acknowledgements and an invalidate every ~50 clocks; its first run found a
+request ram_arb remembered for the second level being issued later with the
+other master's payload (ram_arb's port muxes followed `dma_go`, one clock
+wide - now the owner for the whole transaction). cpu-tests 2259/0 (246
+tests), run-prom, the IRIX 5.3 sim boot, both ram_arb benches.

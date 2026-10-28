@@ -112,6 +112,7 @@ CPUTEST_V = \
 	$(RTL)/scsi/cd_audio.sv \
 	$(RTL)/sgi/pit8254.sv \
 	$(RTL)/sgi/ram_arb.sv \
+	$(RTL)/sgi/l2_cache.sv \
 	$(RTL)/sgi/sgi_memmap.sv \
 	$(RTL)/sgi/sgi_ds1386.sv \
 	$(RTL)/sgi/eeprom_93c56.sv \
@@ -404,6 +405,21 @@ ramarbpftest:
 	   --x-assign fast --x-initial fast --noassert \
 	   -o Vram_arb $(RTL)/sgi/ram_arb.sv tb_ramarb_pf.cpp
 	./obj_dir_ramarbpf/Vram_arb
+
+# The second-level cache (build 56) behind ram_arb, the same bench through
+# tb_l2_wrap.sv: a 2 KB second level so the window evicts it, slow memory,
+# random stores, line writes and DMA writes into the lines it holds, and
+# Main's invalidate (INVAL=n: about one pulse in n clocks).
+#   make l2test && LAT=1 SEED=5 INVAL=3000 ./obj_dir_l2/Vram_arb
+l2test:
+	$V -cc --exe --build --build-jobs 0 --verilate-jobs 1 --Mdir ./obj_dir_l2 --top-module ramarb_l2 \
+	   --prefix Vram_arb -O3 -CFLAGS "-O2 -std=c++17 -I.. -DL2WRAP" $(CPUTEST_W) \
+	   --x-assign fast --x-initial fast --noassert \
+	   -o Vram_arb tb_l2_wrap.sv $(RTL)/sgi/ram_arb.sv $(RTL)/sgi/l2_cache.sv tb_ramarb_pf.cpp
+	./obj_dir_l2/Vram_arb
+	LAT=1 JIT=0 SEED=2 ./obj_dir_l2/Vram_arb
+	LAT=20 SEED=3 INVAL=3000 LINES=200 ./obj_dir_l2/Vram_arb
+	LAT=6 SEED=4 INVAL=50 DMA=60 ./obj_dir_l2/Vram_arb
 
 # -Wno-LATCH: the round-robin pick declares its candidate inside the for loop
 # of an always_comb, which Verilator 5.020 reads as a latch; WM_W carries the

@@ -32,6 +32,9 @@
 #                                  fill one 4-word read, as before
 #   dpf=on|off           status[22], no OSD entry: its data buffer (build 47)
 #   swap=no|yes          O[23]     Swap Alt/Win keys (acts at once)
+#   l2=on|off            status[27], no OSD entry: the second-level cache
+#                                  (build 56, rtl/sgi/l2_cache.sv); off = the
+#                                  two prefetch buffers, as build 48
 #
 # lookahead, dinstrict, ipf and dpf are rows on P9 Debug in a debug build
 # (SGIINDY_DEBUG); a release build has no row for them, or for viddbg/uartdbg.
@@ -65,6 +68,8 @@ FIELDS = {                       # name: (low bit, width, {value: code})
     "ipf":     (21, 1, {"on": 0, "off": 1}),
     "dpf":     (22, 1, {"on": 0, "off": 1}),
     "swap":    (23, 1, {"no": 0, "yes": 1}),
+    # No OSD entry on a release build: the second-level cache (build 56).
+    "l2":      (27, 1, {"on": 0, "off": 1}),
 }
 st = 0
 for arg in sys.argv[1:]:

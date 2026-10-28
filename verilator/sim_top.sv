@@ -37,6 +37,7 @@ module sim_top
     // ram_arb's instruction prefetch buffer (build 46); --no-ipf clears it.
     input  wire        ipf_en,
     input  wire        dpf_en,       // --no-dpf: its data buffer (build 47)
+    input  wire        l2_en,        // --no-l2: the second-level cache (build 56)
     output wire [15:0] audio_l,
     output wire [15:0] audio_r,
     output wire [63:0] audio0, audio1, audio2,
@@ -219,6 +220,7 @@ module sim_top
         .scsi_din_strict(1'b1),
         .ipf_enable(ipf_en),
         .dpf_enable(dpf_en),
+        .l2_enable (l2_en),
 
         .ps2_key       (ps2_key),
         .ps2_mouse     (ps2_mouse),
