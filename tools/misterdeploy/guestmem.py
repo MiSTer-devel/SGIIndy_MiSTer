@@ -9,7 +9,8 @@ guest's bytes in the guest's order. This does both conversions.
 THE ADDRESS. KSEG0 (0x80000000-0x9FFFFFFF) and KSEG1 (0xA0000000-0xBFFFFFFF)
 are unmapped windows onto physical memory, so a panic's EPC needs only its top
 bits removed. Then rtl/sgi/sgi_indy.sv puts main memory at physical 0x08000000
-and rtl/mister/ddr3_mux.sv puts that region at ARM 0x30000000, with the boot
+and rtl/mister/ddr3_mux.sv puts that region at ARM 0x38000000 (0x30000000 up to
+build 50), with the boot
 PROM's 0x1FC00000 at ARM 0x35000000.
 
 THE BYTE ORDER, WHICH IS THE PART THAT CATCHES PEOPLE. The core numbers bytes
@@ -32,7 +33,7 @@ spec = importlib.util.spec_from_file_location("p", "/media/fat/sgidbg/ddr3_peek.
 _m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(_m)
 
-RAM_PHYS, RAM_ARM, RAM_LEN = 0x08000000, 0x30000000, 0x04000000
+RAM_PHYS, RAM_ARM, RAM_LEN = 0x08000000, 0x38000000, 0x08000000
 PROM_PHYS, PROM_ARM, PROM_LEN = 0x1FC00000, 0x35000000, 0x00080000
 
 

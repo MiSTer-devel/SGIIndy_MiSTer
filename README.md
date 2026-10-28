@@ -14,7 +14,7 @@ programs drawn by a reimplementation of the Newport (XL) graphics board.
 | **Desktop** | X11 and the Indigo Magic desktop (4Dwm, the Toolchest, file manager, Console), keyboard and mouse |
 | **Graphics** | Newport with REX3, VC2, two XMAP9s, two CMAPs and the Bt445 RAMDAC, 24 bitplanes (`gfxinfo`: NG1 revision 4, REX3 revision B). X drawing, the IRIS GL demos (`ep`, `bongo`) and the xlock screen savers |
 | **CPU** | MIPS R4600 at 50 MHz with its FPU, 16 KB instruction and 16 KB data caches |
-| **Memory** | 32, 48 or 64 MB |
+| **Memory** | 32, 48, 64 or 128 MB |
 | **Storage** | the WD33C93 SCSI controller with two disks (SCSI IDs 1 and 2) and a CD-ROM drive (SCSI ID 6), all as image files on the SD card |
 | **Clock** | the Dallas DS1386 real-time clock, set from the MiSTer's clock at every start |
 | **Sound** | the HAL2 audio processor fed by HPC3's PBUS DMA: the PROM's startup chime, and IRIX's audio (`kdsp_a2`) at 48 kHz stereo through the MiSTer's audio output, with IRIX's volume control |
@@ -62,8 +62,8 @@ releases/boot.rom             ->  /media/fat/games/SGIIndy/boot.rom
 not create the folder, and it finds the PROM by that name. Without `boot.rom`
 the machine has no firmware and the screen stays dark, with no error anywhere.
 `boot.rom` is SGI's IP24 PROM, version 5.3 (`ip24prom.070-9101-011`); the core
-loads it automatically at every start, and **Load PROM** in the OSD replaces it
-by hand.
+loads it automatically at every start, and **Load ROM** in the OSD replaces it
+for one session.
 
 Disk and CD images go in the same folder, `/media/fat/games/SGIIndy/`.
 
@@ -83,24 +83,34 @@ wait: the PROM boots it on its own.
 
 ## OSD options
 
-| Option | |
-|---|---|
-| **Load PROM** | load a different boot PROM image; `boot.rom` is loaded automatically at start |
-| **SCSI ID1** | the system disk. A raw disk image (`.img`); IRIX boots from this ID |
-| **SCSI ID2** | a second disk |
-| **SCSI ID6 CD** | the CD-ROM drive: an ISO image of an SGI CD (`.iso`) |
-| **Graphics board** | *Fitted* (Newport) or *None*. With *None* the PROM and IRIX use the serial console on the MiSTer's UART pins |
-| **Primary caches** | *On*; *Off* runs uncached and is only useful for debugging |
-| **Memory** | 48, 32 or 64 MB |
-| **Video debug** | *Raw index* shows the frame buffer's colour indices without the palette |
-| **UART debug** | test patterns on the UART pins, for checking a serial cable |
-| **SCSI cache** | *On* caches disk blocks in the FPGA, which makes disk access much faster |
-| **Audio** | *On* fits the HAL2 audio processor. *Off* makes the machine report no audio hardware, so the PROM plays no chime and IRIX loads no audio driver - the way out if audio ever misbehaves. Takes effect at the next reset |
-| **Aspect ratio** | how the scaler fits the picture |
-| **Reset** | resets the machine. Shut IRIX down first - see below |
+The menu follows the [OSD standard for computer cores](https://github.com/danifunker/hp9000-715_MiSTer/blob/master/docs/osd-standard.md):
+the media and Memory on the top page, everything else on numbered pages.
+**Media and the Input page act at once; every other setting waits for the next
+reset.** While a setting differs from what the machine is running, the top page
+shows *Changes pending*; **Apply and reset** resets the machine with the new
+settings (so does any other reset). Shut IRIX down first - see below.
 
-The SCSI slots are remembered: whatever is mounted is mounted again the next
-time the core starts.
+| Page | Option | |
+|---|---|---|
+| top | **Pri. disk (ID 1)** | the system disk. A raw disk image (`.img`); the PROM boots from this ID |
+| top | **Disk (ID 2)** | a second disk |
+| top | **CD-ROM (ID 6)** | the CD-ROM drive: an ISO image of an SGI CD (`.iso`) |
+| top | **Load ROM** | a different boot PROM image for this session; `boot.rom` is loaded at every start |
+| top | **Memory** | 32 (the default), 48, 64 or 128 MB. IRIX 6.5 wants 64 or more |
+| P1 Machine | **Primary caches** | *On*; *Off* runs uncached and is only useful for debugging |
+| P2 Video | **Display** | *Graphics* (Newport) or *Serial console*: with no graphics board the PROM and IRIX use the serial console on the MiSTer's UART pins |
+| P2 Video | **Aspect ratio** | how the scaler fits the picture |
+| P3 Input | **Swap Alt/Win keys** | *Yes* swaps the left and right Alt and Win keys |
+| P4 Audio | **Audio** | *On* fits the HAL2 audio processor. *Off* makes the machine report no audio hardware, so the PROM plays no chime and IRIX loads no audio driver |
+| P5 Advanced | **SCSI cache** | *On* caches disk blocks in the FPGA, which makes disk access much faster |
+
+A debug build (`SGIINDY_DEBUG` defined) adds **P9 Debug** with the bring-up
+instruments: the frame buffer's raw colour indices, UART test patterns, and the
+switches for the SCSI DATA IN look-ahead and guard and the two prefetch buffers.
+
+The disk slots are remembered: whatever is mounted is mounted again the next
+time the core starts. Settings are kept in `config/SGIINDY_v1.CFG`; the older
+`SGIINDY.CFG` is not read, because the Memory list changed order.
 
 ## Using IRIX
 

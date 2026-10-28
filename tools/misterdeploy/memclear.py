@@ -19,7 +19,8 @@ So: run this before a launch you intend to draw conclusions from, the same way
 fb_poke.py marks the frame buffer. A boot on inherited memory is not a boot of
 the build you think you are testing.
 
-MAIN MEMORY ONLY - 0x30000000..0x34000000. The frame buffer at 0x34000000 is
+MAIN MEMORY ONLY - 0x38000000..0x40000000 (128 MB; it was 0x30000000..0x34000000
+up to build 50). The frame buffer at 0x34000000 is
 fb_poke.py's job, and zeroing the PROM at 0x35000000 would stop the machine
 booting at all. Addresses are ARM physical; see ddr3_peek.py for the map.
 
@@ -31,8 +32,8 @@ import mmap
 import os
 import sys
 
-BASE = 0x30000000
-SIZE = 64 << 20
+BASE = 0x38000000
+SIZE = 128 << 20
 CHUNK = 1 << 22
 
 

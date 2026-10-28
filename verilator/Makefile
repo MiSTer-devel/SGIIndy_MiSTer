@@ -443,6 +443,16 @@ ddr3test_sub:
 	   --x-assign fast --x-initial fast --noassert \
 	   -o Vddr3_mux $(RTL)/mister/ddr3_mux.sv tb_ddr3.cpp
 
+# --- keyboard controller across a machine reset ------------------------------
+# hps_io's event toggles survive the core's reset; the i8042 must not replay the
+# last key into the output buffer when they do (build 51: "PC keyboard/mouse
+# controller diagnostic *FAILED*" after OSD resets). See tb_i8042.cpp.
+i8042test:
+	$V -cc --exe --build -j 0 --Mdir ./obj_dir_i8042 --top-module i8042 \
+	   -O3 -CFLAGS "-O2 -std=c++17 -I.." $(CPUTEST_W) \
+	   --x-assign fast --x-initial fast --noassert \
+	   -o Vi8042 $(RTL)/sgi/i8042.sv tb_i8042.cpp
+
 # --- frame buffer line cache unit test -------------------------------------
 # Driven with the display's REAL access pattern - n1280_r3's 1318 of 1680
 # pixels and 1024 of 1065 lines, blanking included - against a memory that

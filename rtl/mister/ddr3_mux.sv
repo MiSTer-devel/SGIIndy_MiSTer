@@ -1,7 +1,7 @@
 //============================================================================
 //  ddr3_mux - the core's four memory ports, on the DE10-Nano's one DDR3.
 //
-//  WHY THERE IS NO CHOICE ABOUT THIS. An Indy has 64 MB of main memory and
+//  WHY THERE IS NO CHOICE ABOUT THIS. An Indy has 128 MB of main memory and
 //  Newport has 16 MB of frame buffer, against about 688 KB of M10K on a
 //  Cyclone V - and the CPU's two primary caches are already in that. So every
 //  byte the machine stores is external memory, and MiSTer gives a core exactly
@@ -66,12 +66,21 @@ module ddr3_mux #(
     // buffer aliased the whole of RAM. The unit test caught it as a display
     // read returning data the rasteriser had never written.
     //
-    // MAIN MEMORY GETS 64 MB WHETHER OR NOT IT IS USING IT. The OSD offers 32,
-    // 48 and 64, and the region is sized for the largest rather than for the
-    // selection: a map that moved with the menu would put the frame buffer at
-    // a different address for every entry, which the guest never sees and
-    // every debugging session would. 80.5 MB of the 256 is spoken for.
-    parameter logic [31:0] BASE_RAM  = 32'h0000_0000,  //  64 MB
+    // MAIN MEMORY GETS 128 MB WHETHER OR NOT IT IS USING IT. The OSD offers 32,
+    // 48, 64 and 128, and the region is sized for the largest rather than for
+    // the selection: a map that moved with the menu would put the frame buffer
+    // at a different address for every entry, which the guest never sees and
+    // every debugging session would.
+    //
+    // IT IS THE TOP HALF OF THE WINDOW, 0x08000000 (ARM 0x38000000), AND IT IS
+    // CONTIGUOUS. Up to build 50 it was 64 MB at 0x00000000 with the frame
+    // buffer right above it; a second 64 MB anywhere else would have been
+    // reached by a 12-word prefetching fill (ram_arb) running off the end of
+    // the first into the frame buffer, cached as RAM that now exists. At
+    // 0x08000000 the base is one constant address bit, so it adds no logic to
+    // the CPU's path into this mux, and the frame buffer, PROM and beacon stay
+    // where every tool already looks for them. 0x00000000-0x03FFFFFF is free.
+    parameter logic [31:0] BASE_RAM  = 32'h0800_0000,  // 128 MB
     parameter logic [31:0] BASE_FB   = 32'h0400_0000,  //  16 MB
     parameter logic [31:0] BASE_PROM = 32'h0500_0000,  // 512 KB
 

@@ -45,7 +45,7 @@ from collections import Counter
 spec = importlib.util.spec_from_file_location("p", "/media/fat/sgidbg/ddr3_peek.py")
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 
-RAM_ARM = 0x30000000          # SGI physical 0x08000000 (guestmem.py)
+RAM_ARM = 0x38000000          # SGI physical 0x08000000 (guestmem.py)
 PANICSTR = 0x881bd184         # unix.ecoff `panicstr`, KSEG0
 W, H, S, FB = 1280, 1024, 2048, 0x34000000
 

@@ -127,7 +127,7 @@ The FPGA and the HPS share one DDR3, and a core's `DDRAM` port uses the same
 physical addresses Linux does, so everything the machine stores can be read
 from the ARM with an mmap of `/dev/mem` — busybox `devmem` reads zeros from
 this window and is not a substitute. Addresses are ARM physical: main memory at
-`0x30000000`, the frame buffer's drawing planes at `0x34000000` and auxiliary
+`0x38000000` (128 MB; `0x30000000` up to build 50), the frame buffer's drawing planes at `0x34000000` and auxiliary
 planes at `0x34800000`, the PROM at `0x35000000`, the debug beacon at
 `0x35800000` ([mister-integration.md](../../docs/reference/mister-integration.md#memory-everything-is-in-ddr3)).
 The core numbers bytes big-endian within a 64-bit word and the ARM reads
@@ -140,7 +140,7 @@ scripts copy them; most import `/media/fat/sgidbg/ddr3_peek.py`.
 |---|---|
 | `ddr3_peek.py ADDR LEN [-o FILE] [--stats]` | the core's DDR3 window at ARM physical addresses: a hex dump, raw bytes to a file, or a count of the non-zero bytes |
 | `guestmem.py ADDR [LEN] [-o FILE]` | the guest's memory by its own KSEG0/KSEG1 addresses, in its own byte order — for disassembling what a panic's EPC points at |
-| `memclear.py [BYTE]` | fills main memory (`0x30000000`–`0x34000000`) with zeros, or `BYTE`, before a launch, so the previous run's state cannot be read as this one's |
+| `memclear.py [BYTE]` | fills main memory (`0x38000000`–`0x40000000`) with zeros, or `BYTE`, before a launch, so the previous run's state cannot be read as this one's |
 | `fb_poke.py bars\|ramp\|fill N\|sig` | writes a test pattern into the drawing planes' colour index from the ARM, and zeroes the auxiliary region; `fill 0xE7` is the marker the scripts use for "not drawn by this boot" |
 | `fbgrab.py [OUT]` | the 1280×1024 colour-index plane, one byte a pixel, to `/tmp/fb.raw` (or `OUT`) — the store, not the screen |
 | `fbgrab32.py X0 Y0 W H OUT` | whole 32-bit slots of both plane sets for a rectangle, for a pixel that is wrong in a way an index cannot show |

@@ -133,7 +133,7 @@ the guest's byte `i` is at ARM offset `7 - i` in each group of eight, and
 `read_log.py` byte-reverses every doubleword. Getting it wrong produces line
 noise rather than an error. Addresses are ARM physical: `sgi_indy.sv` puts
 guest RAM at `0x08000000` and `ddr3_mux.sv` puts that region at ARM
-`0x30000000`, so the log at guest `0x08100000` is at ARM `0x30100000`.
+`0x38000000`, so the log at guest `0x08100000` is at ARM `0x38100000`.
 
 **`--load`** runs `tools/misterdeploy/hammer.py` on the ARM for the length of
 the run: a second heavy reader of DDR3, reading the frame-buffer region, which
