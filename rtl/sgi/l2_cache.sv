@@ -51,6 +51,17 @@
 //  clock - one later than it would have been, against the ~20 it is about to
 //  spend.
 //
+//  A PREDICTED MISS SKIPS THE LOOKUP (build 58). That one clock was the whole
+//  cost of the cache to anything that streams through memory (IRIS's copy,
+//  fill and stream kernels: 1-3 % on build 57, 4-7 % on build 56). After a
+//  burst has fetched lines L..L+2, the fill of L+3 on the same side is a miss
+//  by construction - the two prefetched lines hit, the third is new - so that
+//  fill is issued to the port in the clock it arrives, no tag read first, and
+//  streams in like any other fill (its line is marked invalid when the first
+//  word lands, valid at the last). A wrong prediction is only a port burst the
+//  cache already held - the words are the same, DDR3 is always current - never
+//  a wrong answer. `i_next`/`dm_next` hold the prediction for each side.
+//
 //  Bench: `make -C verilator l2test` (tb_ramarb_pf.cpp driving ram_arb and
 //  this together against a slow memory); the whole-machine simulation runs it
 //  under the PROM and IRIX.
@@ -157,10 +168,15 @@ module l2_cache #(
     logic  [1:0] fline;          // fill: line within the burst (0..2)
     logic [LINE_BITS-1:0] cur_line;   // fill: the line now streaming in
     logic [LINE_BITS-1:0] d_next;     // the line after the previous data fill's
+    logic [LINE_BITS-1:0] i_next;     // the line after the last instruction burst: a miss
+    logic [LINE_BITS-1:0] dm_next;    // ...and after the last data burst
     logic        fill_kill;      // this fill's lines are not kept
 
     wire busy = (state != S_IDLE) || pt;
     wire go   = (up_req || pend) && !busy;
+    // The fill after the last burst on its side: a miss, issued without a lookup.
+    wire spec = is_fill && !sweeping && (line == (up_ifill ? i_next : dm_next));
+    wire spec_go = go && spec;
 
     wire hit  = tag_q[TAG_BITS] && (tag_q[TAG_BITS-1:0] == r_tag) && r_swept;
     wire at_t1 = (state == S_T1);
@@ -173,13 +189,14 @@ module l2_cache #(
     wire fill_word = (state == S_FILL) && dn_ack;
 
     // ---- the port: pass-throughs the same clock, a miss from S_T1 ----------
-    assign dn_req    = (go && !is_fill) || fill_miss;
+    assign dn_req    = (go && (!is_fill || spec)) || fill_miss;
     assign dn_we     = up_we;
     assign dn_addr   = up_addr;
     assign dn_wdata  = up_wdata;
     assign dn_be     = up_be;
     assign dn_burst  = fill_miss ? ((r_ifill || r_stream) && !sweeping ? 4'd12 : 4'd4)
-                                 : up_burst;
+                     : spec_go   ? ((up_ifill || (line == d_next)) ? 4'd12 : 4'd4)
+                     :             up_burst;
     assign dn_wdata3 = up_wdata3;
 
     // ---- upstream answers ------------------------------------------------------
@@ -261,6 +278,8 @@ module l2_cache #(
             fline      <= 2'd0;
             fill_kill  <= 1'b0;
             d_next     <= '0;
+            i_next     <= '0;
+            dm_next    <= '0;
             r_fill     <= 1'b0;
             r_we       <= 1'b0;
             r_wline    <= 1'b0;
@@ -314,8 +333,13 @@ module l2_cache #(
                     cur_line <= line;
                     fill_kill <= sweeping || ext_inval;
                     if (is_fill && up_dfill) d_next <= line + 1'b1;
-                    // Fills and writes wait for the tag; reads pass through.
-                    if (is_fill || up_we) state <= S_T1;
+                    // A predicted miss streams in at once; other fills and
+                    // writes wait for the tag; reads pass through.
+                    if (spec) begin
+                        state <= S_FILL;
+                        beat  <= 2'd0;
+                        fline <= 2'd0;
+                    end else if (is_fill || up_we) state <= S_T1;
                 end
 
                 S_T1: begin
@@ -351,7 +375,12 @@ module l2_cache #(
                             fline    <= fline + 2'd1;
                             cur_line <= cur_line + 1'b1;
                         end
-                        if (dn_last) state <= S_IDLE;
+                        if (dn_last) begin
+                            state <= S_IDLE;
+                            // The line after this burst is the next miss on this side.
+                            if (r_ifill) i_next  <= cur_line + 1'b1;
+                            else         dm_next <= cur_line + 1'b1;
+                        end
                     end
                 end
 
@@ -362,7 +391,7 @@ module l2_cache #(
 
     assign dbg_hit_i  = fill_hit  &&  r_ifill;
     assign dbg_hit_d  = fill_hit  && !r_ifill;
-    assign dbg_fill_i = fill_miss &&  r_ifill;
-    assign dbg_fill_d = fill_miss && !r_ifill;
+    assign dbg_fill_i = (fill_miss &&  r_ifill) || (spec_go &&  up_ifill);
+    assign dbg_fill_d = (fill_miss && !r_ifill) || (spec_go && !up_ifill);
 
 endmodule
