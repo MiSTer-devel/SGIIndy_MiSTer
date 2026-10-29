@@ -43,7 +43,7 @@ build is nearly always the address at the top of a poll loop.
 | `rtl/sgi/i8042.sv` | The PC keyboard/mouse controller at IOC2 `+0x40`/`+0x44`, and both devices behind it |
 | `rtl/sgi/sgi_scc.sv`, `z8530_scc.sv` | The Z85C30 serial controller and its IOC2 glue; channel B is the console |
 | `rtl/sgi/sgi_ds1386.sv` | The Dallas RTC and the NVRAM the PROM keeps its environment in |
-| `rtl/scsi/` | The WD33C93 controller, the SCSI targets and the block cache — see [SCSI](#scsi) |
+| `rtl/scsi/` | The WD33C93 controller and the SCSI targets — see [SCSI](#scsi) |
 | `rtl/newport/` | The graphics board: REX3, VC2, two XMAP9s, two CMAPs and a BT445 |
 
 Each file's header carries the reasoning; [address-map.md](address-map.md) has
@@ -264,8 +264,7 @@ desktop pointer, which VC2's cursor (`rtl/newport/np_vc2.sv`) draws.
 
 ## SCSI
 
-`rtl/scsi/` — the WD33C93 at `0x1FBC0000`, three `scsi.v` targets behind it,
-and a block cache between the targets and the SD card.
+`rtl/scsi/` — the WD33C93 at `0x1FBC0000` and three `scsi.v` targets behind it.
 [rtl/scsi/README.md](../../rtl/scsi/README.md) has what came from where.
 
 - **The controller** (`wd33c93.sv`, decoded off the bus by `sgi_scsi.sv`) is
@@ -277,9 +276,9 @@ and a block cache between the targets and the SD card.
   changes: disks on IDs 1 and 2 and a CD-ROM on ID 6 (`TARGET_EN` and
   `CDROM_IDS` in `sgi_scsi.sv`) — ID 6 is where SGI put the internal CD-ROM.
   No other ID is built.
-- **The block cache** (`scsi_cache.sv`, ported from MacQuadra800_MiSTer)
-  answers reads from block RAM, prefetches, and moves up to eight sectors per
-  HPS transaction; the OSD's **SCSI cache: Off** bypasses it
+- **The block port** in `sgi_scsi.sv` passes one target's sector request at a
+  time to hps_io. Builds 26-51 had a block cache there; Main_MiSTer's write
+  buffer (`support/sgi/sgi_disk.cpp`) replaced it in build 52
   ([scsi-block-cache.md](../design/scsi-block-cache.md)).
 - On MiSTer the OSD's three image slots are **Pri. disk (ID 1)**, **Disk (ID 2)**
   and **CD-ROM (ID 6)**; in simulation `--disk ID=PATH` attaches an image.

@@ -75,7 +75,7 @@ assign BUTTONS = 0;
 `include "build_id.v"
 // THE MENU FOLLOWS THE COMPUTER-CORE OSD STANDARD (danifunker/hp9000-715_MiSTer,
 // docs/osd-standard.md): media, Memory, then the submenus at fixed page numbers
-// - P1 Machine, P2 Video, P3 Input, P4 Audio, P5 Advanced, P9 Debug - and
+// - P1 Machine, P2 Video, P3 Input, P4 Audio, P9 Debug - and
 // "Apply and reset". Every setting is latched into `cfg` at reset (below); only
 // the media and the Input page act at once.
 //
@@ -89,6 +89,11 @@ assign BUTTONS = 0;
 // VERILOG_MACRO assignment in the .qsf). Its rows are the bring-up instruments;
 // the logic behind them stays in every build, so setopt.sh can still use them
 // on a release bitstream.
+//
+// P5 ADVANCED IS GONE since build 52: its one row, "SCSI cache" (status[17]),
+// went with the FPGA block cache, whose job Main's write buffer took over. Bit
+// 17 is reserved; a saved CFG may still hold it set, so nothing reads it and
+// "Changes pending" ignores it.
 localparam CONF_STR = {
 	"SGIIndy;;",
 	"-;",
@@ -120,12 +125,17 @@ localparam CONF_STR = {
 	"F0,ROMBIN,Load ROM;",
 	"-;",
 	"O[13:12],Memory,32MB,48MB,64MB,128MB;",
+	// THE NETWORK INTERFACE (docs/design/ethernet-plan.md) - which of the
+	// MiSTer's interfaces the Indy's ec0 is wired to. Main_MiSTer's sgi_enet
+	// reads these bits itself and reopens the link at once, so the row acts
+	// without a reset and stays out of "Changes pending"; None is a pulled
+	// cable. eth0 first and default, the standard's order (Dani 2026-10-23).
+	"O[26:24],Network interface,eth0,None,eth1,macvlan,tap0;",
 	"-;",
 	"P1,Machine;",
 	"P2,Video;",
 	"P3,Input;",
 	"P4,Audio;",
-	"P5,Advanced;",
 `ifdef SGIINDY_DEBUG
 	"P9,Debug;",
 `endif
@@ -139,6 +149,9 @@ localparam CONF_STR = {
 	// gfx_present below), so this is the standard's "display source".
 	"P2O[10],Display,Graphics,Serial console;",
 	"P2O[122:121],Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
+	// Read from `status`, not `cfg`: it only changes the scaler's output size,
+	// so it acts at once and is never pending (see VIDEO below).
+	"P2O[124:123],Scale,Normal,V-Integer,Narrower HV-Integer,Wider HV-Integer;",
 
 	"P3O[23],Swap Alt/Win keys,No,Yes;",
 
@@ -146,12 +159,6 @@ localparam CONF_STR = {
 	// so the PROM plays no tune and IRIX never loads its audio driver - the
 	// machine as it was before there was a sample path.
 	"P4O[18],Audio,On,Off;",
-
-	// THE SCSI BLOCK CACHE (docs/design/scsi-block-cache.md; rtl/scsi/scsi_cache.sv). Off makes every
-	// block request a single-sector HPS transaction again, as before build
-	// 26 - the control for measuring the cache on one bitstream, and the
-	// way out if it ever misbehaves. scripts/setopt.sh knows it as scsicache.
-	"P5O[17],SCSI cache,On,Off;",
 
 `ifdef SGIINDY_DEBUG
 	// A BRING-UP INSTRUMENT, NOT A FEATURE. The first hardware run drew a
@@ -175,6 +182,7 @@ localparam CONF_STR = {
 	"P9O[20],DATA IN guard,On,Off;",
 	"P9O[21],I-fetch prefetch,On,Off;",
 	"P9O[22],D-fetch prefetch,On,Off;",
+	"P9O[27],L2 cache,On,Off;",
 `endif
 	"v,1;",
 	"V,v",`BUILD_DATE
@@ -207,14 +215,12 @@ reg [127:0] cfg;
 // "Changes pending": an OSD value differs from the running one. Every setting
 // field, and nothing else: not bit 0 (reset), not the Input page (bit 23 acts
 // at once and is never pending).
-wire osd_pending = {status[22:10], status[122:121]}
-                != {cfg[22:10],    cfg[122:121]};
+wire osd_pending = {status[22:18], status[16:10], status[122:121]}
+                != {cfg[22:18],    cfg[16:10],    cfg[122:121]};
 
 // 1280x1024 is 5:4. The Indy's own monitor was 5:4 and the PROM's boot screen
 // is drawn for it, so that is what "Original" means here.
 wire [1:0] ar = cfg[122:121];
-assign VIDEO_ARX = (!ar) ? 12'd5 : (ar - 1'd1);
-assign VIDEO_ARY = (!ar) ? 12'd4 : 12'd0;
 
 wire        ioctl_download;
 wire [15:0] ioctl_index;
@@ -248,10 +254,10 @@ assign sd_lba[0] = 0;
 assign sd_lba[1] = scsi_sd_lba[1];
 assign sd_lba[2] = scsi_sd_lba[2];
 assign sd_lba[3] = scsi_sd_lba[6];
-// Blocks per transaction, minus one. The block cache issues one transaction
-// at a time and says how long it is; hps_io reads the entry for the slot it
-// is servicing, so every slot carries the same value (docs/design/scsi-block-cache.md). Up to 8
-// sectors here; hps_io's own ceiling is 16 KB.
+// Blocks per transaction, minus one. sgi_scsi issues one transaction at a
+// time and says how long it is; hps_io reads the entry for the slot it is
+// servicing, so every slot carries the same value. Always 0 (one sector)
+// since the block cache went in build 52; builds 26-51 asked for up to 8.
 assign sd_blk_cnt[0] = 6'd0;
 assign sd_blk_cnt[1] = scsi_sd_blk_cnt;
 assign sd_blk_cnt[2] = scsi_sd_blk_cnt;
@@ -268,11 +274,32 @@ assign sd_wr = {scsi_sd_wr[6], scsi_sd_wr[2], scsi_sd_wr[1], 1'b0};
 assign scsi_sd_ack       = {sd_ack[3], 3'b000, sd_ack[2], sd_ack[1], 1'b0};
 assign scsi_img_mounted  = {img_mounted[3], 3'b000, img_mounted[2], img_mounted[1], 1'b0};
 
+// Main's port into the Ethernet window (rtl/mister/sgi_enet_uio.sv).
+wire [35:0] EXT_BUS;
+wire        ex_rd, ex_wr, ex_done, ex_inval;
+wire  [8:0] ex_idx;
+wire [15:0] ex_seq;
+wire [31:0] ex_wdata, ex_rdata;
+
+sgi_enet_uio u_enet_uio
+(
+	.clk      (clk_sys),
+	.EXT_BUS  (EXT_BUS),
+	.ex_rd    (ex_rd),
+	.ex_wr    (ex_wr),
+	.ex_idx   (ex_idx),
+	.ex_seq   (ex_seq),
+	.ex_wdata (ex_wdata),
+	.ex_rdata (ex_rdata),
+	.ex_done  (ex_done),
+	.ex_inval (ex_inval)
+);
+
 hps_io #(.CONF_STR(CONF_STR), .WIDE(1), .VDNUM(VDNUM)) hps_io
 (
 	.clk_sys(clk_sys),
 	.HPS_BUS(HPS_BUS),
-	.EXT_BUS(),
+	.EXT_BUS(EXT_BUS),
 	.gamma_bus(),
 
 	.forced_scandoubler(forced_scandoubler),
@@ -405,6 +432,37 @@ always @(posedge clk_sys) begin
 		rst_cnt <= rst_cnt - 1'd1;
 end
 wire reset = (rst_cnt != 0);
+
+// SOFT POWER-OFF. An Indy's power supply is under software control: IRIX 6's
+// shutdown ends in cpu_powerdown, which clears IOC PANEL bit 0 and loops
+// forever waiting for the lights to go out (it never prints "Okay to power
+// off" - that is IRIX 5's path). Without this the guest sat behind "The
+// system is shutting down" for ever (shutdown-hang-todo in the board tools).
+// sgi_ioc.sv reports the falling edge, and the latch below answers it by
+// resetting the CPU alone (not the machine: VC2 would lose its timing tables
+// and the scaler its signal).
+//
+// WHAT THE BOARD DOES WITH THIS (build 60, 2026-10-29): the CPU comes back
+// out of reset within a second and starts the PROM, which reads PANEL bit 0
+// as 0 - the IOC was not reset - and shows its own "Okay to power off the
+// system now. Press any key to restart." dialog; any key restarts the PROM
+// and IRIX autoboots. That is the end point Dani wanted and the one shipped.
+// It is NOT what the code below says: as written, powered_off should stay set
+// (only a user reset clears it), the CPU should stay held and the screen
+// should be the dark purple of the VGA mux. On the board BOTH outcomes occur:
+// Dani saw the purple screen, my two runs saw the PROM dialog - so the latch
+// sometimes releases within a second and sometimes holds; why is OPEN (sgi-board-tools/
+// shutdown-hang-todo.md has a timeline of the releasing case).
+// Left as is on Dani's call. A deliberate one-shot CPU reset pulse on the
+// edge would be the honest form of the same behaviour.
+wire power_off;
+reg  powered_off = 1'b0;
+always @(posedge clk_sys) begin
+	if (RESET | status[0] | buttons[1] | prom_download | ~pll_locked)
+		powered_off <= 1'b0;
+	else if (power_off)
+		powered_off <= 1'b1;
+end
 
 // THE SETTINGS ARE TAKEN FOR THE WHOLE RESET, not on one edge of it. At a core
 // load the framework sends the saved status and then boot.rom, and the tail of
@@ -567,6 +625,8 @@ sgi_indy u_core
 
 	// The PROM's reset vector. KSEG1, uncached, as an R4000 starts.
 	.boot_pc          (32'hBFC00000),
+	.cpu_hold         (powered_off),
+	.power_off        (power_off),
 	.icache_en        (~cfg[11]),
 	.dcache_en        (~cfg[11]),
 
@@ -576,6 +636,15 @@ sgi_indy u_core
 	.audio_en         (~cfg[18]),
 	.audio_l          (hal2_l),
 	.audio_r          (hal2_r),
+
+	.ex_rd            (ex_rd),
+	.ex_wr            (ex_wr),
+	.ex_idx           (ex_idx),
+	.ex_seq           (ex_seq),
+	.ex_wdata         (ex_wdata),
+	.ex_rdata         (ex_rdata),
+	.ex_done          (ex_done),
+	.ex_inval         (ex_inval),
 
 	.ram_req          (ram_req),
 	.ram_we           (ram_we),
@@ -661,7 +730,6 @@ sgi_indy u_core
 	.scsi_sd_buff_dout(sd_buff_dout),
 	.scsi_sd_buff_din (scsi_sd_buff_din),
 	.scsi_sd_buff_wr  (sd_buff_wr),
-	.scsi_cache_bypass(cfg[17]),
 	// Bits 19-22 are rows only on a debug build's P9; on a release build
 	// scripts/setopt.sh sets them.
 	// status[19], setopt.sh lookahead=off: the WD33C93B's DATA IN look-ahead,
@@ -675,6 +743,9 @@ sgi_indy u_core
 	.ipf_enable       (~cfg[21]),
 	// status[22], setopt.sh dpf=off, the data buffer (build 47).
 	.dpf_enable       (~cfg[22]),
+	// status[27], setopt.sh l2=off: the second-level cache (build 56,
+	// rtl/sgi/l2_cache.sv), for the A/B.
+	.l2_enable        (~cfg[27]),
 
 	.dbg_scsi_bcn     (scsi_bcn),
 	.dbg_scsi_stat    (scsi_stat),
@@ -1113,12 +1184,26 @@ end
 // FRAME RATE. See the header, and docs/reference/mister-integration.md.
 assign CLK_VIDEO = clk_sys;
 assign CE_PIXEL  = vid_ce_pix;
-assign VGA_DE = vid_de;
+
+// INTEGER SCALING is the framework's video_freak: it measures the visible
+// window (1280 x 1024) from VGA_DE and turns the aspect ratio into an output
+// size. 1024 lines go into 1080 once, so V-Integer at 1080p is the desktop
+// pixel for pixel, centred, and 2160p gives exactly 2x. No crop: VGA_DE is
+// vid_de unchanged.
+video_freak video_freak
+(
+	.CLK_VIDEO, .CE_PIXEL, .VGA_VS, .HDMI_WIDTH, .HDMI_HEIGHT, .VGA_DE, .VIDEO_ARX, .VIDEO_ARY,
+	.VGA_DE_IN(vid_de),
+	.ARX((!ar) ? 12'd5 : 12'(ar - 1'd1)), .ARY((!ar) ? 12'd4 : 12'd0),
+	.CROP_SIZE(12'd0), .CROP_OFF(5'd0), .SCALE({1'b0, status[124:123]})
+);
 assign VGA_HS = vid_hsync;
 assign VGA_VS = vid_vsync;
-assign VGA_R  = vid_r;
-assign VGA_G  = vid_g;
-assign VGA_B  = vid_b;
+// Dark purple while powered_off is set - which, on hardware, has never been
+// observed (see the power-off note above): the PROM's dialog is what shows.
+assign VGA_R  = powered_off ? 8'h38 : vid_r;
+assign VGA_G  = powered_off ? 8'h00 : vid_g;
+assign VGA_B  = powered_off ? 8'h58 : vid_b;
 
 // The disk light follows the SCSI block interface, which is the only thing in
 // this machine that touches the SD card while it runs.

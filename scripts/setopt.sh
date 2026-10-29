@@ -20,8 +20,7 @@
 #   mem=32|48|64|128     O[13:12]  memory size
 #   viddbg=off|raw       O[14]     show the frame buffer index, no palette
 #   uartdbg=off|sys|ser  O[16:15]  0x55 test pattern from clk_sys or sclk
-#   scsicache=on|off     O[17]     the SCSI block cache (docs/design/scsi-block-cache.md); off = every
-#                                  block request one HPS transaction, as before
+#   (O[17] was scsicache=on|off, the SCSI block cache; reserved since build 52)
 #   audio=on|off         O[18]     HAL2 and the sample path (docs/design/audio.md); off =
 #                                  HAL2 reports itself absent, as before
 #   lookahead=on|off     status[19], no OSD entry: the WD33C93B's DATA IN
@@ -33,6 +32,9 @@
 #                                  fill one 4-word read, as before
 #   dpf=on|off           status[22], no OSD entry: its data buffer (build 47)
 #   swap=no|yes          O[23]     Swap Alt/Win keys (acts at once)
+#   l2=on|off            status[27], no OSD entry: the second-level cache
+#                                  (build 56, rtl/sgi/l2_cache.sv); off = the
+#                                  two prefetch buffers, as build 48
 #
 # lookahead, dinstrict, ipf and dpf are rows on P9 Debug in a debug build
 # (SGIINDY_DEBUG); a release build has no row for them, or for viddbg/uartdbg.
@@ -57,7 +59,6 @@ FIELDS = {                       # name: (low bit, width, {value: code})
     "mem":     (12, 2, {"32": 0, "48": 1, "64": 2, "128": 3}),
     "viddbg":  (14, 1, {"off": 0, "raw": 1}),
     "uartdbg": (15, 2, {"off": 0, "sys": 1, "ser": 2}),
-    "scsicache": (17, 1, {"on": 0, "off": 1}),
     "audio":   (18, 1, {"on": 0, "off": 1}),
     # No OSD entry: the WD33C93B's DATA IN look-ahead, an instrument.
     "lookahead": (19, 1, {"on": 0, "off": 1}),
@@ -67,6 +68,8 @@ FIELDS = {                       # name: (low bit, width, {value: code})
     "ipf":     (21, 1, {"on": 0, "off": 1}),
     "dpf":     (22, 1, {"on": 0, "off": 1}),
     "swap":    (23, 1, {"no": 0, "yes": 1}),
+    # No OSD entry on a release build: the second-level cache (build 56).
+    "l2":      (27, 1, {"on": 0, "off": 1}),
 }
 st = 0
 for arg in sys.argv[1:]:

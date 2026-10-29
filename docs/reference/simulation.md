@@ -100,7 +100,6 @@ exist and does not build.
 | `--max-cycles N` | give up after N clocks (default 4×10⁹) |
 | `--no-gfx` | leave Newport unfitted, which keeps the PROM's console on the serial port |
 | `--no-icache`, `--no-dcache` | run with one or both primary caches off |
-| `--scsi-nocache` | bypass the SCSI block cache, as the OSD's *SCSI cache: Off* does |
 | `--disk ID=PATH` | attach an image at SCSI target ID (default 1); read-only — writes are kept in memory for the run. ID 6 is the CD-ROM, as on the board |
 | `--disk-rw ID=PATH` | the same, with writes going through to the file |
 | `--console FILE` | also write the console output to FILE |
@@ -343,9 +342,8 @@ does not.
 | `newportreplay` | `tb_newport_replay.cpp` | built, then its self-test | an IRIS REX3 bus trace through `newport.sv`, below |
 | `mcdmatest` | `tb_mcdma.cpp` | built and run | the MC's GIO64 DMA engine against a transcription of IRIS's `dma_worker` and `translate_addr`: fill, both copy directions, the µTLB and its faults |
 | `hal2test` | `tb_hal2.cpp` | built and run | HAL2's indirect register file against IRIS's decode, and the ISR bit the PROM's audio init spins on staying clear |
+| `tb_enet` | `tb_enet.sv` | built and run | the Ethernet window (`sgi_hpc3.sv`) driven as IRIX's `if_ec2` drives it on the bus and as Main's `sgi_enet` drives it through `sgi_enet_uio.sv`: ACTIVE at a start, the TX first-descriptor shift, seq-checked writes, the interrupt, RESET, the SEEQ registers |
 | `tb_hpc3` | `tb_hpc3.sv` | built and run | HPC3's register file against a shadow of the specification's map; `HPC3=FILE` runs it on another version of the module |
-| `tb_scsi_cache` | `tb_scsi_cache.sv` | built and run | the SCSI block cache against an engine-like requester and a slow device: prefetch, write-behind, re-base, passthrough, mount invalidation, the OSD bypass, a random mix |
-| `tb_scsi_cache_sgi`, `tb_scsi_cache_nocd` | `tb_scsi_cache.sv` | built and run | the same bench in the shape `sgi_scsi.sv` instantiates (the CD slot cached, a 64-sector window, multi-block) and with the CD slot passed through |
 | `tb_eeprom` | `tb_eeprom.sv` | built and run | the 93C56 configuration EEPROM driven the way the PROM drives it, against a shadow copy |
 | `tb_ds1386` | `tb_ds1386.sv` | built and run | the DS1386's time registers loaded from `hps_io`'s RTC, kept across resets, overridden by software |
 | `cpuonly` | `tb_cpuonly.cpp`, `.sv` | built and run | the CPU and `r4300_bus` alone against a memory whose latency is swept — it builds where the whole machine does not |

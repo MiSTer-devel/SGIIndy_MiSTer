@@ -17,12 +17,11 @@ programs drawn by a reimplementation of the Newport (XL) graphics board.
 | **Memory** | 32, 48, 64 or 128 MB |
 | **Storage** | the WD33C93 SCSI controller with two disks (SCSI IDs 1 and 2) and a CD-ROM drive (SCSI ID 6), all as image files on the SD card |
 | **Clock** | the Dallas DS1386 real-time clock, set from the MiSTer's clock at every start |
+| **Network** | the integral Ethernet (`ec0`, SEEQ 80C03 behind HPC3) on the MiSTer's eth0, eth1, a macvlan or tap0 (OSD *Network interface*); IRIX pings, telnets and FTPs at about 2.3 MB/s each way. Needs a Main_MiSTer with the SGI Indy support (`support/sgi`, not yet in the official MiSTer) |
 | **Sound** | the HAL2 audio processor fed by HPC3's PBUS DMA: the PROM's startup chime, and IRIX's audio (`kdsp_a2`) at 48 kHz stereo through the MiSTer's audio output, with IRIX's volume control |
 
 ### Not there yet
 
-- **Networking**: IRIX sees `ec0` but there is no Ethernet behind it, so it
-  reports `no carrier`.
 - **Sound input and digital audio**: the analogue and AES inputs record
   silence, and the AES output goes nowhere.
 - **Saved PROM settings**: the PROM's environment (`setenv`) is not kept when
@@ -35,6 +34,12 @@ programs drawn by a reimplementation of the Newport (XL) graphics board.
 - Parallel port, ISDN, video capture (VINO) and IndyCam are not implemented.
 
 ### Fixed since the first release
+
+**IRIX 6 shutdown used to wait for ever.** "The system is shutting down"
+stayed on screen because the kernel was waiting for the power to go away and
+the core never switched it off. Since release 20261029 the shutdown ends at
+the PROM's "Okay to power off" dialog or a dark purple screen (see *Using
+IRIX*).
 
 **CD reads could come back with a byte wrong.** Installing IRIX from the CD,
 `inst`'s checksums caught one file with the last word of a disk block damaged,
@@ -97,12 +102,13 @@ settings (so does any other reset). Shut IRIX down first - see below.
 | top | **CD-ROM (ID 6)** | the CD-ROM drive: an ISO image of an SGI CD (`.iso`) |
 | top | **Load ROM** | a different boot PROM image for this session; `boot.rom` is loaded at every start |
 | top | **Memory** | 32 (the default), 48, 64 or 128 MB. IRIX 6.5 wants 64 or more |
+| top | **Network interface** | which of the MiSTer's interfaces `ec0` uses: *eth0* (the default), *None* (a pulled cable), *eth1*, *macvlan* (eth0 with the Indy's own MAC) or *tap0*. Acts at once; needs the matching Main_MiSTer |
 | P1 Machine | **Primary caches** | *On*; *Off* runs uncached and is only useful for debugging |
 | P2 Video | **Display** | *Graphics* (Newport) or *Serial console*: with no graphics board the PROM and IRIX use the serial console on the MiSTer's UART pins |
 | P2 Video | **Aspect ratio** | how the scaler fits the picture |
+| P2 Video | **Scale** | *Normal* scales to the screen at the aspect ratio; *V-Integer* and the two *HV-Integer* modes show the 1280x1024 desktop at a whole multiple (1x at 1080p and 1440p, 2x at 2160p). Acts at once |
 | P3 Input | **Swap Alt/Win keys** | *Yes* swaps the left and right Alt and Win keys |
 | P4 Audio | **Audio** | *On* fits the HAL2 audio processor. *Off* makes the machine report no audio hardware, so the PROM plays no chime and IRIX loads no audio driver |
-| P5 Advanced | **SCSI cache** | *On* caches disk blocks in the FPGA, which makes disk access much faster |
 
 A debug build (`SGIINDY_DEBUG` defined) adds **P9 Debug** with the bring-up
 instruments: the frame buffer's raw colour indices, UART test patterns, and the
@@ -116,8 +122,15 @@ time the core starts. Settings are kept in `config/SGIINDY_v1.CFG`; the older
 
 - **Shut down before you reset or leave the core.** IRIX keeps filesystem
   changes in memory; use *System > Shut Down* from the Toolchest, or type
-  `init 0` as root, and wait for the PROM menu. A reset in the middle of a
-  session can leave the root filesystem needing a long `fsck` on the next boot.
+  `init 0` as root, and wait for the machine to power itself off. An Indy's
+  power supply is under software control, so IRIX 6 ends its shutdown by
+  switching the power off; the core shows that in one of two ways, either
+  the PROM's "Okay to power off the system now. Press any key to restart."
+  dialog (a key then reboots) or a plain dark purple screen. Both mean the
+  disk is safe; to start again use *Apply and reset* in the OSD or reload the
+  core. IRIX 5.3 shows the "Okay to power off" dialog. A reset in the middle
+  of a session can leave the root filesystem needing a long `fsck` on the next
+  boot.
 - **Back up your disk image.** Keep a copy of a freshly installed image; it is
   the quickest way back from a damaged filesystem.
 - **Sound on an existing IRIX image needs one step.** IRIX links its audio
@@ -179,8 +192,7 @@ part of the machine was built and verified.
   [Killer Instinct](https://github.com/MiSTer-devel/Arcade-KillerInstinct_MiSTer)
   arcade core, itself derived from the [N64](https://github.com/MiSTer-devel/N64_MiSTer)
   core's R4300i. `rtl/cpu/r4300/UPSTREAM.md` records every local change.
-- The SCSI target from the MiSTer MacLC core, and the SCSI block cache from the
-  MacQuadra800 core.
+- The SCSI target from the MiSTer MacLC core.
 - The DE1-based SGI reverse-engineering work this core grew out of: OzOnE.
 - IRIS, the SGI Indy emulator, used throughout as the reference model and as the
   source of the bare-metal MIPS CPU test suite.

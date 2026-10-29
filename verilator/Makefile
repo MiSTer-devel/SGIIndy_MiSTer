@@ -107,12 +107,12 @@ CPUTEST_V = \
 	$(RTL)/sgi/sgi_ioc.sv \
 	$(RTL)/sgi/i8042.sv \
 	$(RTL)/scsi/sgi_scsi.sv \
-	$(RTL)/scsi/scsi_cache.sv \
 	$(RTL)/scsi/wd33c93.sv \
 	$(RTL)/scsi/scsi.v \
 	$(RTL)/scsi/cd_audio.sv \
 	$(RTL)/sgi/pit8254.sv \
 	$(RTL)/sgi/ram_arb.sv \
+	$(RTL)/sgi/l2_cache.sv \
 	$(RTL)/sgi/sgi_memmap.sv \
 	$(RTL)/sgi/sgi_ds1386.sv \
 	$(RTL)/sgi/eeprom_93c56.sv \
@@ -149,21 +149,10 @@ cputest: $(RTL)/cpu/generated/r4300_wrap.v
 	   -o Vsim_top $(CPUTEST_V) $(CPUTEST_C)
 
 
-# --- the SCSI block cache's own bench (docs/design/scsi-block-cache.md) -----------------------------
-# rtl/scsi/scsi_cache.sv against an engine-like requester and a slow device
-# model with random latency: prefetch, write-behind, re-base, passthrough,
-# mount invalidation, a random mix, the installer's burst, multi-block
-# transactions, and the OSD bypass. Ported with the module from
-# MacQuadra800_MiSTer; --binary --timing because the bench is procedural.
-#   make -C verilator tb_scsi_cache
+# --- the procedural benches (--binary --timing): their shared warning set ----
+# tb_scsi_cache used it first; the block cache and its bench went in build 52.
 TBC_W = -Wno-fatal -Wno-WIDTH -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-UNSIGNED -Wno-CMPCONST \
         -Wno-DECLFILENAME -Wno-CASEINCOMPLETE -Wno-BLKSEQ -Wno-MULTIDRIVEN -Wno-SYNCASYNCNET -Wno-COMBDLY
-tb_scsi_cache:
-	$V --binary --timing $(TBC_W) +define+SIMULATION=1 +define+VERILATOR=1 +incdir+$(RTL)/scsi \
-	   --top-module tb_scsi_cache --Mdir ./obj_dir_tbc -o tb_scsi_cache \
-	   tb_scsi_cache.sv $(RTL)/scsi/scsi_cache.sv
-	./obj_dir_tbc/tb_scsi_cache
-
 # --- the DS1386 against the MiSTer's clock (docs/design/r4600-accuracy-clock-disk.md) --------------------------
 # rtl/sgi/sgi_ds1386.sv's time registers loaded from hps_io's RTC: every field,
 # the 1940-based year, the weekday, a time sent during reset, resets keeping the
@@ -200,6 +189,25 @@ tb_hpc3:
 	   tb_hpc3.sv $(HPC3) $(RTL)/sgi/hpc3_scsi_dma.sv $(RTL)/sgi/hal2.sv $(RTL)/sgi/hpc3_pbus_dma.sv
 	./obj_dir_tbhpc3/tb_hpc3
 
+# --- IOC PANEL's soft power-off edge (build 60) ------------------------------
+# rtl/sgi/sgi_ioc.sv must report bit 0 of PANEL falling - IRIX 6's
+# cpu_powerdown - once per edge and never for the PROM's own PANEL writes.
+#   make -C verilator tb_ioc_poweroff
+tb_ioc_poweroff:
+	$V --binary --timing $(TBC_W) --top-module tb_ioc_poweroff --Mdir ./obj_dir_tbiocpo -o tb_ioc_poweroff \
+	   tb_ioc_poweroff.sv $(RTL)/sgi/sgi_ioc.sv $(RTL)/sgi/pit8254.sv
+	./obj_dir_tbiocpo/tb_ioc_poweroff
+
+# --- the Ethernet window: if_ec2 on the bus, Main through the UIO decoder ----
+# rtl/sgi/sgi_hpc3.sv's Ethernet registers and SEEQ against the contract in
+# docs/design/ethernet-plan.md section 3, Main's side through the real
+# rtl/mister/sgi_enet_uio.sv a strobe at a time.
+#   make -C verilator tb_enet
+tb_enet:
+	$V --binary --timing $(TBC_W) --unroll-count 2048 --unroll-stmts 20000 --top-module tb_enet --Mdir ./obj_dir_tbenet -o tb_enet \
+	   tb_enet.sv $(HPC3) $(RTL)/sgi/hpc3_scsi_dma.sv $(RTL)/sgi/hal2.sv $(RTL)/sgi/hpc3_pbus_dma.sv $(RTL)/mister/sgi_enet_uio.sv
+	./obj_dir_tbenet/tb_enet
+
 # --- the SCSI DMA engine alone, against a memory that answers late --------
 # ram_arb's grant and a DDR3 round trip hold the engine's request for tens of
 # clocks on the board; sim_ram.v answers in one or two. The bench sets both
@@ -219,22 +227,6 @@ tb_scsidma:
 tb_ipf:
 	$V --binary --timing $(TBC_W) --top-module tb_ipf --Mdir ./obj_dir_tbipf -o tb_ipf 	   tb_ipf.sv $(RTL)/sgi/ram_arb.sv
 	./obj_dir_tbipf/tb_ipf
-
-# The bench in the shape sgi_scsi.sv instantiates since build 27: the CD slot
-# cached with a 64-sector window and multi-block on (CACHE_CD = 1, SECT2 = 64,
-# MB_CD = 1).
-tb_scsi_cache_sgi:
-	$V --binary --timing $(TBC_W) +define+SIMULATION=1 +define+VERILATOR=1 +incdir+$(RTL)/scsi \
-	   +define+CACHE_CD_TB=1 +define+CACHE_S2_TB=64 +define+MB_CD_TB=1 \
-	   --top-module tb_scsi_cache --Mdir ./obj_dir_tbc_sgi -o tb_scsi_cache_sgi \
-	   tb_scsi_cache.sv $(RTL)/scsi/scsi_cache.sv
-	./obj_dir_tbc_sgi/tb_scsi_cache_sgi
-
-# The build 26 shape: the CD slot passes through and has no store (CACHE_CD = 0,
-# SECT2 = 0).
-tb_scsi_cache_nocd:
-	$V --binary --timing $(TBC_W) +define+SIMULATION=1 +define+VERILATOR=1 +incdir+$(RTL)/scsi 	   +define+CACHE_CD_TB=0 +define+CACHE_S2_TB=0 	   --top-module tb_scsi_cache --Mdir ./obj_dir_tbc_nocd -o tb_scsi_cache_nocd 	   tb_scsi_cache.sv $(RTL)/scsi/scsi_cache.sv
-	./obj_dir_tbc_nocd/tb_scsi_cache_nocd
 
 # --- whole-machine headless harness (builds on Verilator 5.020) ------------
 # The same sim_top as `cputest`, but with the three flags that Verilator 5.020
@@ -422,6 +414,21 @@ ramarbpftest:
 	   --x-assign fast --x-initial fast --noassert \
 	   -o Vram_arb $(RTL)/sgi/ram_arb.sv tb_ramarb_pf.cpp
 	./obj_dir_ramarbpf/Vram_arb
+
+# The second-level cache (build 56) behind ram_arb, the same bench through
+# tb_l2_wrap.sv: a 2 KB second level so the window evicts it, slow memory,
+# random stores, line writes and DMA writes into the lines it holds, and
+# Main's invalidate (INVAL=n: about one pulse in n clocks).
+#   make l2test && LAT=1 SEED=5 INVAL=3000 ./obj_dir_l2/Vram_arb
+l2test:
+	$V -cc --exe --build --build-jobs 0 --verilate-jobs 1 --Mdir ./obj_dir_l2 --top-module ramarb_l2 \
+	   --prefix Vram_arb -O3 -CFLAGS "-O2 -std=c++17 -I.. -DL2WRAP" $(CPUTEST_W) \
+	   --x-assign fast --x-initial fast --noassert \
+	   -o Vram_arb tb_l2_wrap.sv $(RTL)/sgi/ram_arb.sv $(RTL)/sgi/l2_cache.sv tb_ramarb_pf.cpp
+	./obj_dir_l2/Vram_arb
+	LAT=1 JIT=0 SEED=2 ./obj_dir_l2/Vram_arb
+	LAT=20 SEED=3 INVAL=3000 LINES=200 ./obj_dir_l2/Vram_arb
+	LAT=6 SEED=4 INVAL=50 DMA=60 ./obj_dir_l2/Vram_arb
 
 # -Wno-LATCH: the round-robin pick declares its candidate inside the for loop
 # of an always_comb, which Verilator 5.020 reads as a latch; WM_W carries the

@@ -7,23 +7,24 @@ the SCSI images, the keyboard, the mouse and the clock, the SCC on the board's
 UART, and VC2's raster to the scaler. This is how each of those is wired, and
 why.
 
-The current release is `releases/SGIIndy_20261023.rbf` (build 51, dated
-261023) with `releases/boot.rom`: the computer-core OSD standard (pages,
-settings latched at reset, *Changes pending*, Swap Alt/Win keys), up to 128 MB
-of memory, OSD resets that no longer fail POST's keyboard-controller test, and
-the keyboard in scan-code set 3 when IRIX asks for it (Ctrl, Alt and Caps Lock
-right under IRIX), on top of build 50's IRIX 6.2/6.5 install and IRIX menus.
-The framework's YC/composite output is left out (it cannot carry this raster).
+The current release is `releases/SGIIndy_20261028.rbf` (build 59, dated
+261028) with `releases/boot.rom`: a 128 KB second-level cache in block RAM
+(docs/design/cache-fill-latency.md sections 9-10), Ethernet (`ec0` on the
+MiSTer's network) and disk writes buffered by Main_MiSTer in place of the
+FPGA's SCSI block cache, on top of build 51b. Ethernet and the write buffer
+need a Main_MiSTer with the SGI Indy support (`support/sgi`).
 It was built with Quartus Prime Lite 17.0.2 **on the Linux build machine
-(m900)** at fitter seed 3, the seed `sgiindy.qsf` keeps: 37,094 of 41,910
-ALMs (89 %), 493 of 553 M10K blocks, 61 of 112 DSP blocks, and timing met in
-every check - worst setup slack +1.521 ns on the 50 MHz core clock and
-+0.201 ns on the HDMI pixel clock. `SEED=3 BUILD_DATE=261023 bash scripts/build.sh` on that machine
+(m900)** at fitter seed 2 (seed 3, the one `sgiindy.qsf` keeps, missed the HDMI
+clock by 0.5 ns on this build): 36,388 of 41,910 ALMs (87 %), 533 of 553
+M10K blocks, 61 of 112 DSP blocks, and timing met in every check - worst
+setup slack +0.245 ns on the 50 MHz core clock and +0.302 ns on the HDMI
+pixel clock. `SEED=2 BUILD_DATE=261028 bash scripts/build.sh` on that machine
 rebuilds it; Quartus on Windows places the same inputs differently, so a
 bitstream is only bit-identical on the machine that built it. The earlier
-releases, `SGIIndy_20260928.rbf` (build 50, seed 5, m900),
-`SGIIndy_20260927.rbf` (build 48, seed 5, m900) and `SGIIndy_20260918.rbf`
-(build 44, seed 1, built on Windows), stay in `releases/` beside it. `scripts/build.sh` writes that report into `reports/` after every
+releases `SGIIndy_20260928.rbf` (build 50, seed 5, m900), `SGIIndy_20260927.rbf`
+(build 48, seed 5, m900) and `SGIIndy_20260918.rbf` (build 44, seed 1, built on
+Windows) stay in `releases/` beside it; the interim builds 51b and 54 of this
+branch (SGIIndy_20261023 and _20261025) were folded into it. `scripts/build.sh` writes that report into `reports/` after every
 compile; [deploy-and-debug.md](deploy-and-debug.md#building) has the flow.
 
 ## The map
@@ -312,7 +313,10 @@ the scaler does.
 
 **Aspect ratio.** *Original* is 5:4, because the Indy's own monitor was
 1280×1024 and the PROM's boot screen is drawn for it; *Full Screen* and the
-two custom ratios are the framework's.
+two custom ratios are the framework's. **Scale** is the framework's
+`video_freak`: it measures the 1280×1024 window from `VGA_DE` and asks the
+scaler for a whole multiple of it - 1x at 1080p and 1440p (the desktop pixel
+for pixel, centred), 2x at 2160p; below 1024 lines it falls back to the ratio.
 
 **The refresh is 27.9 Hz because a pixel is one core clock.** Sixty hertz would
 need the table's own 107.5 MHz pixel clock — VC2's generator in a clock domain
@@ -328,8 +332,9 @@ scaler hides the difference.
 
 The layout is the computer-core [OSD standard](https://github.com/danifunker/hp9000-715_MiSTer/blob/master/docs/osd-standard.md)
 (since build 51): media and Memory on the top page, P1 Machine, P2 Video,
-P3 Input, P4 Audio, P5 Advanced, and P9 Debug only when `SGIINDY_DEBUG` is
-defined. `sgiindy.sv` latches `status` into `cfg` for the whole of every reset
+P3 Input, P4 Audio, and P9 Debug only when `SGIINDY_DEBUG` is defined
+(P5 Advanced held only *SCSI cache* and went with it in build 52; status bit
+17 is reserved and left out of *Changes pending*). `sgiindy.sv` latches `status` into `cfg` for the whole of every reset
 and every setting reads `cfg`, so a changed row does nothing until **Apply and
 reset** (`R[0]`) or any other reset; `status_menumask` bit 0 is "settings
 differ from `cfg`" and shows the *Changes pending* row (`h0-`). Only the media
@@ -343,12 +348,13 @@ keeps the settings in `SGIINDY_v1.CFG`.
 | top | CD-ROM (ID 6) | `SC3` | a CD-ROM image on ID 6 |
 | top | Load ROM | `F0,ROMBIN` | an SGI PROM image at ioctl index 0, the same index the automatic `boot.rom` uses, for that session only; the core is held in reset until the download finishes |
 | top | Memory: 32MB / 48MB / 64MB / 128MB | `O[13:12]` | main memory size; 32 MB is the default (the standard's "smallest that runs the usual OS") |
+| top | Network interface: eth0 / None / eth1 / macvlan / tap0 | `O[26:24]` | the host side of `ec0` ([ethernet-plan.md](../design/ethernet-plan.md)); Main_MiSTer's `sgi_enet` reads the bits itself and reopens the link at once, so the row is outside *Changes pending*; the value order is Main's A2065 mode numbering, as on the HP 9000 |
 | P1 | Primary caches: On / Off | `O[11]` | both primary caches, for bisecting a fault onto them without a rebuild |
 | P2 | Display: Graphics / Serial console | `O[10]` | whether Newport answers on the bus. **Fitting it moves the console off the serial port**: ARCS installs a DisplayController with `ConsoleOut\|Output` and the PROM stops printing to the SCC, so *Serial console* is a real machine configuration, not a degraded mode |
 | P2 | Aspect ratio | `O[122:121]` | Original (5:4), Full Screen, and the two custom ratios |
+| P2 | Scale: Normal / V-Integer / Narrower HV-Integer / Wider HV-Integer | `O[124:123]` | the framework's integer scaling; acts at once, outside *Changes pending* |
 | P3 | Swap Alt/Win keys: No / Yes | `O[23]` | swaps set 2's left Alt (`11`) with left Win (`E0 1F`) and right Alt (`E0 11`) with right Win (`E0 27`) on the way into the i8042, which translates to set 3 when the guest asks for it (IRIX does); acts at once |
 | P4 | Audio: On / Off | `O[18]` | Off makes HAL2 report itself absent |
-| P5 | SCSI cache: On / Off | `O[17]` | the SCSI block cache (`rtl/scsi/scsi_cache.sv`, [scsi-block-cache.md](../design/scsi-block-cache.md)); Off makes every block request a single-sector HPS transaction |
 | P9 | Video debug: Off / Raw index | `O[14]` | shows the frame buffer's colour index as grey with CMAP taken out of the path (the cursor as white), and a line-cache miss as index `0x80` |
 | P9 | UART debug: Off / 0x55 clk_sys / 0x55 sclk | `O[16:15]` | replaces the SCC on `UART_TXD` with an endless 9600-baud `0x55` from either clock domain, to separate the SCC from the path to the HPS |
 | P9 | DATA IN look-ahead, DATA IN guard, I-fetch prefetch, D-fetch prefetch | `O[19]`..`O[22]` | the A/B switches `setopt.sh` calls `lookahead`, `dinstrict`, `ipf`, `dpf` |
@@ -510,7 +516,7 @@ it runs on `pll_locked` alone, so a guest reset does not stop it. Word 0 is
 | 10 | the PC entering decode and the CP0 debug bits, the pipeline's stall vector among them — what `prof.py` samples | `sgi_indy.sv` |
 | 11–14 | the MC's VDMA engine and its descriptors, REX3's beat counters, the display ID and mode entry being shown | `sgi_indy.sv`, `newport.sv` |
 | 15 | the line caches: drawing-plane misses, auxiliary misses, auxiliary lines skipped | `sgiindy.sv` |
-| 16–20 | SCSI disk-time counters: HPS transactions, busy and wait time, block cache hits and misses, DATA-phase bytes and time | `sgi_scsi.sv` |
+| 16–20 | SCSI disk-time counters: HPS transactions, busy and wait time, DATA-phase bytes and time (the block cache's hits and misses up to build 51, zero since) | `sgi_scsi.sv` |
 | 21–28 | CPU performance counters: instructions, stalls by stage, TLB walks, cache fills and their bus clocks | `sgi_indy.sv` |
 | 29–34 | the DDR3 port: clocks each master held it, clocks the CPU and the rasteriser waited, transactions, read latency | `sgiindy.sv`, `ddr3_mux.sv` |
 | 35 | instruction fills after an instruction TLB walk, and fills answered from a line already held | `sgi_indy.sv` |
@@ -545,7 +551,7 @@ The comment above the writer in `sgiindy.sv` is the authoritative bit map.
 ## Installing a release
 
 ```
-/media/fat/_Computer/SGIIndy_20261023.rbf   the core, in any "_" folder
+/media/fat/_Computer/SGIIndy_20261028.rbf   the core, in any "_" folder
 /media/fat/games/SGIIndy/boot.rom           the PROM: releases/boot.rom
 ```
 

@@ -123,6 +123,10 @@ module ram_arb (
     // the data buffer's switch.
     input  logic        cpu_dfill,
     input  logic        dpf_enable,
+    // Main has written guest RAM from the ARM (the Ethernet's frames and
+    // descriptors, docs/design/ethernet-plan.md): those writes never pass the
+    // snoop below, so this pulse forgets both buffers outright.
+    input  logic        ext_inval,
     output logic        cpu_ack,
     output logic        cpu_last,
     // The word that goes with cpu_ack: the port's, or the buffer's.
@@ -150,6 +154,11 @@ module ram_arb (
     output logic  [7:0] ram_be,
     output logic  [3:0] ram_burst,     // 1..4, or 12 for a prefetching fill
     output logic [191:0] ram_wdata3,
+    // The CPU's fill flags, passed down for l2_cache.sv (build 56): held
+    // with the payload. A DMA transaction never has a burst of 4, so the
+    // second level needs no owner check to trust them.
+    output logic        ram_ifill,
+    output logic        ram_dfill,
     input  logic [63:0] ram_rdata,
     input  logic        ram_ack,
     input  logic        ram_last,
@@ -183,6 +192,7 @@ module ram_arb (
     logic  [1:0] pf_v    [2];   // each line whole, and not written since
     logic [63:0] pf_mem  [16];  // buffer b, line l, word w at {b, l, w}
     logic        pf_run;        // the CPU's transaction is a 12-word burst
+    logic        pf_kill;       // ...whose words may predate an ext_inval
     logic        pf_buf;        // ...filling this buffer
     logic  [3:0] pf_beat;       // its words received so far
     logic        srv;           // answering a fill from a buffer
@@ -239,6 +249,7 @@ module ram_arb (
             pf_v[0]    <= 2'b00;
             pf_v[1]    <= 2'b00;
             pf_run     <= 1'b0;
+            pf_kill    <= 1'b0;
             pf_buf     <= 1'b0;
             pf_beat    <= 4'd0;
             srv        <= 1'b0;
@@ -293,11 +304,24 @@ module ram_arb (
             if (port_cpu_word && pf_run) begin
                 pf_beat <= pf_beat + 4'd1;
                 if (pf_beat >= 4'd4) pf_mem[{pf_buf, 3'(pf_beat - 4'd4)}] <= ram_rdata;
-                if (pf_beat == 4'd7)  pf_v[pf_buf][0] <= 1'b1;
+                if (pf_beat == 4'd7 && !pf_kill)  pf_v[pf_buf][0] <= 1'b1;
                 if (pf_beat == 4'd11) begin
-                    pf_v[pf_buf][1] <= 1'b1;
+                    if (!pf_kill) pf_v[pf_buf][1] <= 1'b1;
                     pf_run          <= 1'b0;
                 end
+            end
+
+            // ---- Main's writes: forget everything buffered. A burst still
+            // streaming in may have read its lines before Main's writes
+            // landed, so it finishes (the CPU's own words are current: it
+            // asked for them before the frame was there to read) but its
+            // prefetched lines are never marked whole. A burst issued in this
+            // same clock reads after the writes and is kept.
+            if (pf_new) pf_kill <= 1'b0;
+            if (ext_inval) begin
+                pf_v[0] <= 2'b00;
+                pf_v[1] <= 2'b00;
+                if (pf_run && !pf_new) pf_kill <= 1'b1;
             end
 
             // ---- the snoop: a write into a buffered line forgets it, in both
@@ -310,14 +334,21 @@ module ram_arb (
         end
     end
 
+    // THE PAYLOAD STAYS THE OWNER'S FOR THE WHOLE TRANSACTION (build 56), not
+    // just the issue clock: l2_cache.sv may remember a request and issue it
+    // to the real port clocks later, and the first l2test run showed a DMA
+    // write issued that way with the CPU's address, burst and data.
+    wire dma_sel = dma_go | (inflight & owner_dma);
     assign ram_req   = cpu_go_ram | dma_go;
-    assign ram_we    = dma_go ? dma_we    : cpu_we;
-    assign ram_addr  = dma_go ? dma_addr  : cpu_addr;
-    assign ram_wdata = dma_go ? dma_wdata : cpu_wdata;
-    assign ram_be    = dma_go ? dma_be    : cpu_be;
+    assign ram_we    = dma_sel ? dma_we    : cpu_we;
+    assign ram_addr  = dma_sel ? dma_addr  : cpu_addr;
+    assign ram_wdata = dma_sel ? dma_wdata : cpu_wdata;
+    assign ram_be    = dma_sel ? dma_be    : cpu_be;
     // The DMA engines move one word per transaction and have no burst input.
-    assign ram_burst = dma_go ? 4'd1 : pf_new ? 4'd12 : {1'b0, cpu_burst};
+    assign ram_burst = dma_sel ? 4'd1 : pf_new ? 4'd12 : {1'b0, cpu_burst};
     assign ram_wdata3 = cpu_wdata3;          // read only with the CPU's burst
+    assign ram_ifill  = cpu_ifill;
+    assign ram_dfill  = cpu_dfill;
 
     assign cpu_ack     = srv | port_fwd;
     assign cpu_last    = srv    ? (srv_beat == 2'd3)

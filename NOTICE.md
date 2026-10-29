@@ -12,7 +12,6 @@ is already GPL-3.0 - so the whole can be distributed under GPL-3.0.
 | MIPS R4600 CPU | `rtl/cpu/r4300/` | [MiSTer-devel/Arcade-KillerInstinct_MiSTer](https://github.com/MiSTer-devel/Arcade-KillerInstinct_MiSTer) `rtl/cpu/`, commit `5c443bd`; itself a fork of [MiSTer-devel/N64_MiSTer](https://github.com/MiSTer-devel/N64_MiSTer)'s R4300i | GPL-3.0 |
 | MiSTer framework | `sys/` | [MiSTer-devel/Template_MiSTer](https://github.com/MiSTer-devel/Template_MiSTer) | GPL-2.0-or-later, parts GPL-3.0 |
 | SCSI target | `rtl/scsi/scsi.v` | the MiSTer MacPlus core ([MiSTer-devel/MacPlus_MiSTer](https://github.com/MiSTer-devel/MacPlus_MiSTer), a port of MiST's Plus Too), by way of the MacLC core | no licence notice in the file or its upstream; distributed there as part of the MiSTer project |
-| SCSI block cache | `rtl/scsi/scsi_cache.sv` | ported from the MacQuadra800 core, where it was written by this core's author | GPL-3.0 here |
 | Z8530 SCC | `rtl/sgi/z8530_scc.sv` | written for this project's DE1-based predecessor | GPL-3.0 |
 | Altera primitive stand-ins | `rtl/cpu/prim/` | written for this project, for simulation | GPL-3.0 |
 | Simulator front end | `verilator/sim/` | the MiSTer Verilator simulation framework: Dear ImGui and ImPlot (MIT), ImGuiFileDialog (MIT), dirent (MIT), Verilator's runtime headers (LGPL-3.0 / Artistic-2.0) | as marked in each file |
