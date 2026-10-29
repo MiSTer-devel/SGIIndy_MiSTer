@@ -7,22 +7,23 @@ the SCSI images, the keyboard, the mouse and the clock, the SCC on the board's
 UART, and VC2's raster to the scaler. This is how each of those is wired, and
 why.
 
-The current release is `releases/SGIIndy_20261025.rbf` (build 54, dated
-261025) with `releases/boot.rom`: Ethernet (`ec0` on the MiSTer's network) and
-disk writes buffered by Main_MiSTer in place of the FPGA's SCSI block cache,
-on top of build 51b. Both need a Main_MiSTer with the SGI Indy support
-(`support/sgi`).
+The current release is `releases/SGIIndy_20261028.rbf` (build 57, dated
+261028) with `releases/boot.rom`: a 128 KB second-level cache in block RAM
+(docs/design/cache-fill-latency.md sections 9-10), Ethernet (`ec0` on the
+MiSTer's network) and disk writes buffered by Main_MiSTer in place of the
+FPGA's SCSI block cache, on top of build 51b. Ethernet and the write buffer
+need a Main_MiSTer with the SGI Indy support (`support/sgi`).
 It was built with Quartus Prime Lite 17.0.2 **on the Linux build machine
-(m900)** at fitter seed 3, the seed `sgiindy.qsf` keeps: 35,660 of 41,910
-ALMs (85 %), 397 of 553 M10K blocks, 61 of 112 DSP blocks, and timing met in
-every check - worst setup slack +1.349 ns on the 50 MHz core clock and
-+0.233 ns on the HDMI pixel clock. `SEED=3 BUILD_DATE=261025 bash scripts/build.sh` on that machine
+(m900)** at fitter seed 3, the seed `sgiindy.qsf` keeps: 36,173 of 41,910
+ALMs (86 %), 533 of 553 M10K blocks, 61 of 112 DSP blocks, and timing met in
+every check - worst setup slack +1.565 ns on the 50 MHz core clock and
++0.296 ns on the HDMI pixel clock. `SEED=3 BUILD_DATE=261028 bash scripts/build.sh` on that machine
 rebuilds it; Quartus on Windows places the same inputs differently, so a
 bitstream is only bit-identical on the machine that built it. The earlier
-releases, `SGIIndy_20261023.rbf` (build 51b: the OSD standard, 128 MB, the
-keyboard fixes; seed 3, m900), `SGIIndy_20260928.rbf` (build 50, seed 5, m900),
-`SGIIndy_20260927.rbf` (build 48, seed 5, m900) and `SGIIndy_20260918.rbf`
-(build 44, seed 1, built on Windows), stay in `releases/` beside it. `scripts/build.sh` writes that report into `reports/` after every
+releases `SGIIndy_20260928.rbf` (build 50, seed 5, m900), `SGIIndy_20260927.rbf`
+(build 48, seed 5, m900) and `SGIIndy_20260918.rbf` (build 44, seed 1, built on
+Windows) stay in `releases/` beside it; the interim builds 51b and 54 of this
+branch (SGIIndy_20261023 and _20261025) were folded into it. `scripts/build.sh` writes that report into `reports/` after every
 compile; [deploy-and-debug.md](deploy-and-debug.md#building) has the flow.
 
 ## The map
@@ -549,7 +550,7 @@ The comment above the writer in `sgiindy.sv` is the authoritative bit map.
 ## Installing a release
 
 ```
-/media/fat/_Computer/SGIIndy_20261023.rbf   the core, in any "_" folder
+/media/fat/_Computer/SGIIndy_20261028.rbf   the core, in any "_" folder
 /media/fat/games/SGIIndy/boot.rom           the PROM: releases/boot.rom
 ```
 
