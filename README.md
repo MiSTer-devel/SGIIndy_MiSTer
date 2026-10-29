@@ -35,6 +35,12 @@ programs drawn by a reimplementation of the Newport (XL) graphics board.
 
 ### Fixed since the first release
 
+**IRIX 6 shutdown used to wait for ever.** "The system is shutting down"
+stayed on screen because the kernel was waiting for the power to go away and
+the core never switched it off. Since release 20261029 the shutdown ends at
+the PROM's "Okay to power off" dialog or a dark purple screen (see *Using
+IRIX*).
+
 **CD reads could come back with a byte wrong.** Installing IRIX from the CD,
 `inst`'s checksums caught one file with the last word of a disk block damaged,
 the same way every time. The SCSI controller could take a byte before the
@@ -116,8 +122,15 @@ time the core starts. Settings are kept in `config/SGIINDY_v1.CFG`; the older
 
 - **Shut down before you reset or leave the core.** IRIX keeps filesystem
   changes in memory; use *System > Shut Down* from the Toolchest, or type
-  `init 0` as root, and wait for the PROM menu. A reset in the middle of a
-  session can leave the root filesystem needing a long `fsck` on the next boot.
+  `init 0` as root, and wait for the machine to power itself off. An Indy's
+  power supply is under software control, so IRIX 6 ends its shutdown by
+  switching the power off; the core shows that in one of two ways, either
+  the PROM's "Okay to power off the system now. Press any key to restart."
+  dialog (a key then reboots) or a plain dark purple screen. Both mean the
+  disk is safe; to start again use *Apply and reset* in the OSD or reload the
+  core. IRIX 5.3 shows the "Okay to power off" dialog. A reset in the middle
+  of a session can leave the root filesystem needing a long `fsck` on the next
+  boot.
 - **Back up your disk image.** Keep a copy of a freshly installed image; it is
   the quickest way back from a damaged filesystem.
 - **Sound on an existing IRIX image needs one step.** IRIX links its audio

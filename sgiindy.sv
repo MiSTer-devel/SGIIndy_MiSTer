@@ -449,9 +449,10 @@ wire reset = (rst_cnt != 0);
 // and IRIX autoboots. That is the end point Dani wanted and the one shipped.
 // It is NOT what the code below says: as written, powered_off should stay set
 // (only a user reset clears it), the CPU should stay held and the screen
-// should be the dark purple of the VGA mux - and on hardware none of that
-// shows. Why the latch releases is an OPEN question (sgi-board-tools/
-// shutdown-hang-todo.md has the timeline); the purple has never been seen.
+// should be the dark purple of the VGA mux. On the board BOTH outcomes occur:
+// Dani saw the purple screen, my two runs saw the PROM dialog - so the latch
+// sometimes releases within a second and sometimes holds; why is OPEN (sgi-board-tools/
+// shutdown-hang-todo.md has a timeline of the releasing case).
 // Left as is on Dani's call. A deliberate one-shot CPU reset pulse on the
 // edge would be the honest form of the same behaviour.
 wire power_off;
