@@ -189,6 +189,15 @@ tb_hpc3:
 	   tb_hpc3.sv $(HPC3) $(RTL)/sgi/hpc3_scsi_dma.sv $(RTL)/sgi/hal2.sv $(RTL)/sgi/hpc3_pbus_dma.sv
 	./obj_dir_tbhpc3/tb_hpc3
 
+# --- IOC PANEL's soft power-off edge (build 60) ------------------------------
+# rtl/sgi/sgi_ioc.sv must report bit 0 of PANEL falling - IRIX 6's
+# cpu_powerdown - once per edge and never for the PROM's own PANEL writes.
+#   make -C verilator tb_ioc_poweroff
+tb_ioc_poweroff:
+	$V --binary --timing $(TBC_W) --top-module tb_ioc_poweroff --Mdir ./obj_dir_tbiocpo -o tb_ioc_poweroff \
+	   tb_ioc_poweroff.sv $(RTL)/sgi/sgi_ioc.sv $(RTL)/sgi/pit8254.sv
+	./obj_dir_tbiocpo/tb_ioc_poweroff
+
 # --- the Ethernet window: if_ec2 on the bus, Main through the UIO decoder ----
 # rtl/sgi/sgi_hpc3.sv's Ethernet registers and SEEQ against the contract in
 # docs/design/ethernet-plan.md section 3, Main's side through the real

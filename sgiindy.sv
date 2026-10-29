@@ -433,6 +433,26 @@ always @(posedge clk_sys) begin
 end
 wire reset = (rst_cnt != 0);
 
+// SOFT POWER-OFF. An Indy's power supply is under software control: IRIX 6's
+// shutdown ends in cpu_powerdown, which clears IOC PANEL bit 0 and loops
+// forever waiting for the lights to go out (it never prints "Okay to power
+// off" - that is IRIX 5's path). Without this the guest sat behind "The
+// system is shutting down" for ever (shutdown-hang-todo in the board tools).
+// sgi_ioc.sv reports the falling edge; from then on the CPU alone is held in
+// reset and the screen is painted dark purple, and the machine stays that way
+// until something a user does resets it - the OSD's "Apply and reset", the
+// board's button, a core reload - which is the power button of a real Indy.
+// Not a machine reset: VC2 would lose its timing tables and the scaler its
+// signal. Not a settings bit either; the only way out is that reset.
+wire power_off;
+reg  powered_off = 1'b0;
+always @(posedge clk_sys) begin
+	if (RESET | status[0] | buttons[1] | prom_download | ~pll_locked)
+		powered_off <= 1'b0;
+	else if (power_off)
+		powered_off <= 1'b1;
+end
+
 // THE SETTINGS ARE TAKEN FOR THE WHOLE RESET, not on one edge of it. At a core
 // load the framework sends the saved status and then boot.rom, and the tail of
 // 65,535 clocks after the download covers a status word that arrives late. The
@@ -594,6 +614,8 @@ sgi_indy u_core
 
 	// The PROM's reset vector. KSEG1, uncached, as an R4000 starts.
 	.boot_pc          (32'hBFC00000),
+	.cpu_hold         (powered_off),
+	.power_off        (power_off),
 	.icache_en        (~cfg[11]),
 	.dcache_en        (~cfg[11]),
 
@@ -1166,9 +1188,11 @@ video_freak video_freak
 );
 assign VGA_HS = vid_hsync;
 assign VGA_VS = vid_vsync;
-assign VGA_R  = vid_r;
-assign VGA_G  = vid_g;
-assign VGA_B  = vid_b;
+// Dark purple while powered off (above); the timing underneath is still VC2's,
+// so the scaler and the OSD carry on as if the desktop were there.
+assign VGA_R  = powered_off ? 8'h38 : vid_r;
+assign VGA_G  = powered_off ? 8'h00 : vid_g;
+assign VGA_B  = powered_off ? 8'h58 : vid_b;
 
 // The disk light follows the SCSI block interface, which is the only thing in
 // this machine that touches the SD card while it runs.

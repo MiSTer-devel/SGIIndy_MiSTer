@@ -164,6 +164,15 @@ module sgi_indy #(
     // directly. A bring-up instrument; see rtl/newport/newport.sv.
     input  logic        dbg_raw_index,
 
+    // ---- soft power --------------------------------------------------------
+    // power_off is IOC PANEL bit 0 falling (sgi_ioc.sv): IRIX 6's
+    // cpu_powerdown switching the supply off, after which it loops forever.
+    // cpu_hold is the top level's answer: the CPU alone back in reset, every
+    // device left running so the display timing stays up (VC2 loses its
+    // tables in reset) and the top level can paint the "powered off" screen.
+    input  logic        cpu_hold,
+    output logic        power_off,
+
     // ---- audio -----------------------------------------------------------
     // The OSD's audio switch: low, HAL2 reports itself absent and the machine
     // is what it was before it had a sample path (rtl/sgi/hal2.sv). The DAC
@@ -367,7 +376,7 @@ module sgi_indy #(
     r4300_wrap u_cpu (
         .clk              (clk),
         .ce               (ce),
-        .reset            (reset),
+        .reset            (reset | cpu_hold),
         .boot_pc          (boot_pc),
 
         .INSTRCACHEON     (icache_en),
@@ -1060,7 +1069,8 @@ module sgi_indy #(
         // active low, as the Z8530's INT pin is.
         .map_source ({2'b00, ~scc_int_n, kbd_irq | mouse_irq, 4'h0}),
         .irq_lines (irq_lines),
-        .int2_state (int2_state_o)
+        .int2_state (int2_state_o),
+        .power_off  (power_off)
     );
 
     assign irq_lines_o = irq_lines;

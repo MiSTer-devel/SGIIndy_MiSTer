@@ -274,6 +274,8 @@ module sim_top
         // to run and can be compared against a control.
         .host_rtc      (65'd0),
         .dbg_raw_index (1'b0),   // --fbindex does this in C++, on the dump
+        .cpu_hold      (1'b0),   // the soft power-off is sgiindy.sv's business
+        .power_off     (),
         .audio_en      (audio_en),
         .audio_l       (audio_l),
         .audio_r       (audio_r),

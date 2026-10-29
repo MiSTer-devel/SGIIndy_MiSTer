@@ -91,12 +91,22 @@ module sgi_ioc #(
     // Observability. INT2's whole visible state in one bus, so a harness can
     // say why a line is or is not asserted without reaching into the
     // hierarchy: {MAP_STAT, L1_MASK, L1_STAT, L0_MASK, L0_STAT}.
-    output logic [39:0] int2_state
+    output logic [39:0] int2_state,
+
+    // SOFT POWER-OFF. PANEL bit 0 is the power state (1 = on, reset value).
+    // IRIX's cpu_powerdown (IP22) writes 0xFFFFFFFE here and then loops
+    // forever, because on an Indy the supply drops at that write and nothing
+    // after it ever runs. This is that 1 -> 0 edge, one clock wide; the top
+    // level decides what "the supply dropped" means (sgiindy.sv). Only the
+    // edge, never the level: the PROM writes PANEL too, for its three
+    // write-1-to-clear bits, always with bit 0 set (IRIS: ioc.rs IOC_PANEL).
+    output logic        power_off
 );
 
     // Register indices, as (offset >> 2).
     localparam int I_KBD_DATA  = 8'h40 >> 2;
     localparam int I_KBD_CMD   = 8'h44 >> 2;
+    localparam int I_PANEL     = 8'h50 >> 2;
     localparam int I_SYS_ID    = 8'h58 >> 2;
     localparam int I_L0_STAT   = 8'h80 >> 2;
     localparam int I_L0_MASK   = 8'h84 >> 2;
@@ -225,6 +235,7 @@ module sgi_ioc #(
     always_ff @(posedge clk) begin
         ack   <= 1'b0;
         rdata <= 64'h0;
+        power_off <= 1'b0;
 
         pit_out_d <= pit_out;
 
@@ -254,6 +265,8 @@ module sgi_ioc #(
                     wr_byte_v = ioc_wr_byte(w[0]);
                     if (idx == I_TMR_CLR)
                         tmr_stat <= tmr_stat & ~wr_byte_v[1:0];
+                    if (idx == I_PANEL && reg8[I_PANEL][0] && !wr_byte_v[0])
+                        power_off <= 1'b1;
                     // The three status registers are read-only, the timer has
                     // its own state; everything else, including all the masks,
                     // is plain storage.
