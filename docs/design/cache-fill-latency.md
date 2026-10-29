@@ -512,3 +512,19 @@ fed by 12-word bursts the L2 would have to serve), not another cut inside it.
 Under IRIX build 58 is within run-to-run noise of build 57 (that bzip2 run
 drew 11 % more L1 data fills; per fill 13.5 -> 12.7 clocks); DISKCHECK PASS.
 Raw table `tests/out/hw/irisbench/results58.bin`.
+
+**Build 59: four predictions instead of one per side** (`46bb94c`). A copy
+is two interleaved streams and a triad three, so one "next miss" register per
+side was overwritten by the other stream every other fill; four entries (the
+line after each of the last four bursts, any side) follow them all. Fit seed 2:
+36,388 ALMs, core +0.245 ns (seed 3: core +1.122 but HDMI -0.526), HDMI
++0.302. Bench, same image, same night, against build 54: **no kernel below
+parity any more** - copy 1.003, stream_copy 1.011, scale 1.004, triad 1.004,
+the 256 KB and 8 MB chases 1.012, unaligned 1.015, random 1.004, resize
+1.006, composite 1.004 - and the wins unchanged (convolve3x3 1.456,
+motion_est 1.254, yuv2rgb 1.243, rotate90 1.047, LINPACK 3.51 MFLOPS).
+Under IRIX within run-to-run noise of 57/58; DISKCHECK PASS. So the read
+streams' residual was the miss path after all, for misses one predictor
+could not follow; the earlier guess at the hit path was wrong. Raw table
+`tests/out/hw/irisbench/results59.bin`. Released as `SGIIndy_20261028.rbf`
+(replacing builds 57 and 58 in that file the same day).
