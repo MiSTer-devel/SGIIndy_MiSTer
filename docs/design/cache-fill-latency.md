@@ -485,3 +485,15 @@ as is the sys/ group, which left no records on any build (the suite exits
 after 40 kernels; its message went to the UART).
 
 Raw tables: `tests/out/hw/irisbench/results{54,56b,57}.bin` (not committed).
+
+**Build 57 under IRIX, same night, same control** (perfprobe, pristine 5.3
+image): 60 x ls 3.57 -> 3.03 s (**1.18x**), `bzip2 -9` 79.6 -> 73.4 s (1.085x),
+`ls -lR` scroll 5.05 -> 4.66 s (1.085x), xterm2 1.10x, perl 11.55 -> 11.34 s
+(1.02x - this run drew 7.4 M instruction fills against 4.6 M, perl's placement
+lottery); rawdisk, xdpyinfo and launch-to-X (81 s) unchanged. Instruction fills
+8.2-9.6 clocks on the bus (build 54: 13.5), data fills 11-14 (18.5); CPI bzip2
+1.77 -> 1.66, fork 1.40 -> 1.36. **DISKCHECK PASS** (IRIX's sums of /unix, libc,
+libX11, libXm against the bytes on disk, and a byte-identical copy of /unix).
+Build 57 is the release candidate; build 56's own disk verdict was never
+obtained (two launcher failures), build 57 carries the same cache with one
+less wait state.
