@@ -60,7 +60,10 @@
 //  streams in like any other fill (its line is marked invalid when the first
 //  word lands, valid at the last). A wrong prediction is only a port burst the
 //  cache already held - the words are the same, DDR3 is always current - never
-//  a wrong answer. `i_next`/`dm_next` hold the prediction for each side.
+//  a wrong answer. Four such predictions are kept (build 59; build 58 kept one
+//  per side, which a copy - two interleaved streams - defeated every other
+//  fill): the line after each of the last four bursts, the entry a prediction
+//  came from replaced by the burst it started, the others round-robin.
 //
 //  Bench: `make -C verilator l2test` (tb_ramarb_pf.cpp driving ram_arb and
 //  this together against a slow memory); the whole-machine simulation runs it
@@ -168,15 +171,19 @@ module l2_cache #(
     logic  [1:0] fline;          // fill: line within the burst (0..2)
     logic [LINE_BITS-1:0] cur_line;   // fill: the line now streaming in
     logic [LINE_BITS-1:0] d_next;     // the line after the previous data fill's
-    logic [LINE_BITS-1:0] i_next;     // the line after the last instruction burst: a miss
-    logic [LINE_BITS-1:0] dm_next;    // ...and after the last data burst
+    logic [LINE_BITS-1:0] nx [4];     // the lines after the last four bursts: misses
+    logic  [1:0] nx_rr;               // round-robin replacement
+    logic  [1:0] nx_hit;              // the entry this fill matched
+    logic        r_spec;              // this fill was predicted
     logic        fill_kill;      // this fill's lines are not kept
 
     wire busy = (state != S_IDLE) || pt;
     wire go   = (up_req || pend) && !busy;
     // The fill after the last burst on its side: a miss, issued without a lookup.
-    wire spec = is_fill && !sweeping && (line == (up_ifill ? i_next : dm_next));
+    wire [3:0] nx_m = { line == nx[3], line == nx[2], line == nx[1], line == nx[0] };
+    wire spec = is_fill && !sweeping && (|nx_m);
     wire spec_go = go && spec;
+    wire [1:0] nx_sel = nx_m[0] ? 2'd0 : nx_m[1] ? 2'd1 : nx_m[2] ? 2'd2 : 2'd3;
 
     wire hit  = tag_q[TAG_BITS] && (tag_q[TAG_BITS-1:0] == r_tag) && r_swept;
     wire at_t1 = (state == S_T1);
@@ -278,8 +285,13 @@ module l2_cache #(
             fline      <= 2'd0;
             fill_kill  <= 1'b0;
             d_next     <= '0;
-            i_next     <= '0;
-            dm_next    <= '0;
+            nx[0]      <= '0;
+            nx[1]      <= '0;
+            nx[2]      <= '0;
+            nx[3]      <= '0;
+            nx_rr      <= 2'd0;
+            nx_hit     <= 2'd0;
+            r_spec     <= 1'b0;
             r_fill     <= 1'b0;
             r_we       <= 1'b0;
             r_wline    <= 1'b0;
@@ -332,6 +344,8 @@ module l2_cache #(
                     r_swept  <= !sweeping || (idx < sweep_idx);
                     cur_line <= line;
                     fill_kill <= sweeping || ext_inval;
+                    r_spec    <= spec;
+                    nx_hit    <= nx_sel;
                     if (is_fill && up_dfill) d_next <= line + 1'b1;
                     // A predicted miss streams in at once; other fills and
                     // writes wait for the tag; reads pass through.
@@ -377,9 +391,14 @@ module l2_cache #(
                         end
                         if (dn_last) begin
                             state <= S_IDLE;
-                            // The line after this burst is the next miss on this side.
-                            if (r_ifill) i_next  <= cur_line + 1'b1;
-                            else         dm_next <= cur_line + 1'b1;
+                            // The line after this burst is a coming miss: it
+                            // takes the entry that predicted this fill, or the
+                            // oldest.
+                            if (r_spec) nx[nx_hit] <= cur_line + 1'b1;
+                            else begin
+                                nx[nx_rr] <= cur_line + 1'b1;
+                                nx_rr     <= nx_rr + 2'd1;
+                            end
                         end
                     end
                 end
