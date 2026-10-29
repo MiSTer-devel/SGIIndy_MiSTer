@@ -497,3 +497,18 @@ libX11, libXm against the bytes on disk, and a byte-identical copy of /unix).
 Build 57 is the release candidate; build 56's own disk verdict was never
 obtained (two launcher failures), build 57 carries the same cache with one
 less wait state.
+
+**Build 58: a predicted miss skips the lookup** (`f20b962`; after a burst
+fetched L..L+2, the fill of L+3 on that side is issued in the clock it
+arrives). Fit seed 3: 36,155 ALMs, core +0.112 ns (the compare sits on the
+port-request path; build 57 had +1.565), HDMI +0.251. Bench, same image, same
+night: mem/fill 0.993 -> **1.000** and mem/unaligned 0.986 -> **1.000**, every
+other kernel within 0.1 % of build 57 - the read streams stay at 0.966-0.975.
+So the residual on streaming reads is not the miss path: in a stream two of
+every three fills HIT the lines the previous burst brought in and pay the
+L2's one-clock lookup, where build 54's two-line buffer answered them with
+none. Closing that needs a zero-latency buffer in front of the L2 (ram_arb's,
+fed by 12-word bursts the L2 would have to serve), not another cut inside it.
+Under IRIX build 58 is within run-to-run noise of build 57 (that bzip2 run
+drew 11 % more L1 data fills; per fill 13.5 -> 12.7 clocks); DISKCHECK PASS.
+Raw table `tests/out/hw/irisbench/results58.bin`.
