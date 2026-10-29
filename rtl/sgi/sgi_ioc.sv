@@ -97,7 +97,10 @@ module sgi_ioc #(
     // IRIX's cpu_powerdown (IP22) writes 0xFFFFFFFE here and then loops
     // forever, because on an Indy the supply drops at that write and nothing
     // after it ever runs. This is that 1 -> 0 edge, one clock wide; the top
-    // level decides what "the supply dropped" means (sgiindy.sv). Only the
+    // level decides what "the supply dropped" means (sgiindy.sv: the CPU is
+    // reset, and the PROM then reads this bit as 0 and shows its "Okay to
+    // power off the system now" dialog - the register itself is NOT reset
+    // by that, which is exactly what makes the PROM say so). Only the
     // edge, never the level: the PROM writes PANEL too, for its three
     // write-1-to-clear bits, always with bit 0 set (IRIS: ioc.rs IOC_PANEL).
     output logic        power_off

@@ -438,12 +438,22 @@ wire reset = (rst_cnt != 0);
 // forever waiting for the lights to go out (it never prints "Okay to power
 // off" - that is IRIX 5's path). Without this the guest sat behind "The
 // system is shutting down" for ever (shutdown-hang-todo in the board tools).
-// sgi_ioc.sv reports the falling edge; from then on the CPU alone is held in
-// reset and the screen is painted dark purple, and the machine stays that way
-// until something a user does resets it - the OSD's "Apply and reset", the
-// board's button, a core reload - which is the power button of a real Indy.
-// Not a machine reset: VC2 would lose its timing tables and the scaler its
-// signal. Not a settings bit either; the only way out is that reset.
+// sgi_ioc.sv reports the falling edge, and the latch below answers it by
+// resetting the CPU alone (not the machine: VC2 would lose its timing tables
+// and the scaler its signal).
+//
+// WHAT THE BOARD DOES WITH THIS (build 60, 2026-10-29): the CPU comes back
+// out of reset within a second and starts the PROM, which reads PANEL bit 0
+// as 0 - the IOC was not reset - and shows its own "Okay to power off the
+// system now. Press any key to restart." dialog; any key restarts the PROM
+// and IRIX autoboots. That is the end point Dani wanted and the one shipped.
+// It is NOT what the code below says: as written, powered_off should stay set
+// (only a user reset clears it), the CPU should stay held and the screen
+// should be the dark purple of the VGA mux - and on hardware none of that
+// shows. Why the latch releases is an OPEN question (sgi-board-tools/
+// shutdown-hang-todo.md has the timeline); the purple has never been seen.
+// Left as is on Dani's call. A deliberate one-shot CPU reset pulse on the
+// edge would be the honest form of the same behaviour.
 wire power_off;
 reg  powered_off = 1'b0;
 always @(posedge clk_sys) begin
@@ -1188,8 +1198,8 @@ video_freak video_freak
 );
 assign VGA_HS = vid_hsync;
 assign VGA_VS = vid_vsync;
-// Dark purple while powered off (above); the timing underneath is still VC2's,
-// so the scaler and the OSD carry on as if the desktop were there.
+// Dark purple while powered_off is set - which, on hardware, has never been
+// observed (see the power-off note above): the PROM's dialog is what shows.
 assign VGA_R  = powered_off ? 8'h38 : vid_r;
 assign VGA_G  = powered_off ? 8'h00 : vid_g;
 assign VGA_B  = powered_off ? 8'h58 : vid_b;

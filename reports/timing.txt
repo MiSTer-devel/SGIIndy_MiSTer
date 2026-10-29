@@ -5,13 +5,13 @@ TimeQuest timing summaries - sgiindy.sta.rpt (slow 1100mV 100C model unless stat
 +-----------------------------------------------------------------------------------+--------+---------------+
 ; Clock                                                                             ; Slack  ; End Point TNS ;
 +-----------------------------------------------------------------------------------+--------+---------------+
-; emu|pll|pll_inst|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk           ; 0.245  ; 0.000         ;
-; pll_hdmi|pll_hdmi_inst|altera_pll_i|cyclonev_pll|counter[0].output_counter|divclk ; 0.302  ; 0.000         ;
-; sysmem|fpga_interfaces|clocks_resets|h2f_user0_clk                                ; 3.295  ; 0.000         ;
-; spi_sck                                                                           ; 5.955  ; 0.000         ;
-; FPGA_CLK1_50                                                                      ; 7.892  ; 0.000         ;
-; FPGA_CLK2_50                                                                      ; 11.929 ; 0.000         ;
-; pll_audio|pll_audio_inst|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk   ; 14.720 ; 0.000         ;
+; emu|pll|pll_inst|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk           ; 0.329  ; 0.000         ;
+; pll_hdmi|pll_hdmi_inst|altera_pll_i|cyclonev_pll|counter[0].output_counter|divclk ; 0.463  ; 0.000         ;
+; sysmem|fpga_interfaces|clocks_resets|h2f_user0_clk                                ; 3.902  ; 0.000         ;
+; spi_sck                                                                           ; 5.927  ; 0.000         ;
+; FPGA_CLK1_50                                                                      ; 8.351  ; 0.000         ;
+; FPGA_CLK2_50                                                                      ; 12.274 ; 0.000         ;
+; pll_audio|pll_audio_inst|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk   ; 14.464 ; 0.000         ;
 +-----------------------------------------------------------------------------------+--------+---------------+
 
 +-----------------------------------------------------------------------------------------------------------+
@@ -19,13 +19,13 @@ TimeQuest timing summaries - sgiindy.sta.rpt (slow 1100mV 100C model unless stat
 +-----------------------------------------------------------------------------------+-------+---------------+
 ; Clock                                                                             ; Slack ; End Point TNS ;
 +-----------------------------------------------------------------------------------+-------+---------------+
-; emu|pll|pll_inst|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk           ; 0.128 ; 0.000         ;
-; pll_hdmi|pll_hdmi_inst|altera_pll_i|cyclonev_pll|counter[0].output_counter|divclk ; 0.251 ; 0.000         ;
-; pll_audio|pll_audio_inst|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk   ; 0.262 ; 0.000         ;
-; sysmem|fpga_interfaces|clocks_resets|h2f_user0_clk                                ; 0.348 ; 0.000         ;
-; spi_sck                                                                           ; 0.391 ; 0.000         ;
-; FPGA_CLK1_50                                                                      ; 0.412 ; 0.000         ;
-; FPGA_CLK2_50                                                                      ; 0.423 ; 0.000         ;
+; emu|pll|pll_inst|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk           ; 0.246 ; 0.000         ;
+; pll_hdmi|pll_hdmi_inst|altera_pll_i|cyclonev_pll|counter[0].output_counter|divclk ; 0.256 ; 0.000         ;
+; FPGA_CLK2_50                                                                      ; 0.262 ; 0.000         ;
+; pll_audio|pll_audio_inst|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk   ; 0.292 ; 0.000         ;
+; FPGA_CLK1_50                                                                      ; 0.309 ; 0.000         ;
+; sysmem|fpga_interfaces|clocks_resets|h2f_user0_clk                                ; 0.406 ; 0.000         ;
+; spi_sck                                                                           ; 0.445 ; 0.000         ;
 +-----------------------------------------------------------------------------------+-------+---------------+
 
 +------------------------------------------------------------------------------------------------------------+
@@ -33,10 +33,10 @@ TimeQuest timing summaries - sgiindy.sta.rpt (slow 1100mV 100C model unless stat
 +-----------------------------------------------------------------------------------+--------+---------------+
 ; Clock                                                                             ; Slack  ; End Point TNS ;
 +-----------------------------------------------------------------------------------+--------+---------------+
-; pll_hdmi|pll_hdmi_inst|altera_pll_i|cyclonev_pll|counter[0].output_counter|divclk ; 3.986  ; 0.000         ;
-; sysmem|fpga_interfaces|clocks_resets|h2f_user0_clk                                ; 5.637  ; 0.000         ;
-; emu|pll|pll_inst|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk           ; 9.141  ; 0.000         ;
-; FPGA_CLK1_50                                                                      ; 15.772 ; 0.000         ;
+; pll_hdmi|pll_hdmi_inst|altera_pll_i|cyclonev_pll|counter[0].output_counter|divclk ; 4.160  ; 0.000         ;
+; emu|pll|pll_inst|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk           ; 8.131  ; 0.000         ;
+; sysmem|fpga_interfaces|clocks_resets|h2f_user0_clk                                ; 8.347  ; 0.000         ;
+; FPGA_CLK1_50                                                                      ; 16.606 ; 0.000         ;
 +-----------------------------------------------------------------------------------+--------+---------------+
 
 +-----------------------------------------------------------------------------------------------------------+
@@ -44,10 +44,10 @@ TimeQuest timing summaries - sgiindy.sta.rpt (slow 1100mV 100C model unless stat
 +-----------------------------------------------------------------------------------+-------+---------------+
 ; Clock                                                                             ; Slack ; End Point TNS ;
 +-----------------------------------------------------------------------------------+-------+---------------+
-; pll_hdmi|pll_hdmi_inst|altera_pll_i|cyclonev_pll|counter[0].output_counter|divclk ; 0.866 ; 0.000         ;
-; emu|pll|pll_inst|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk           ; 1.040 ; 0.000         ;
-; FPGA_CLK1_50                                                                      ; 1.094 ; 0.000         ;
-; sysmem|fpga_interfaces|clocks_resets|h2f_user0_clk                                ; 2.480 ; 0.000         ;
+; emu|pll|pll_inst|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk           ; 0.697 ; 0.000         ;
+; sysmem|fpga_interfaces|clocks_resets|h2f_user0_clk                                ; 1.090 ; 0.000         ;
+; FPGA_CLK1_50                                                                      ; 1.124 ; 0.000         ;
+; pll_hdmi|pll_hdmi_inst|altera_pll_i|cyclonev_pll|counter[0].output_counter|divclk ; 1.285 ; 0.000         ;
 +-----------------------------------------------------------------------------------+-------+---------------+
 
 +------------------------------------------------------------------------------------------------------------+
@@ -58,13 +58,13 @@ TimeQuest timing summaries - sgiindy.sta.rpt (slow 1100mV 100C model unless stat
 ; pll_hdmi|pll_hdmi_inst|altera_pll_i|cyclonev_pll|fpll_0|fpll|vcoph[0]             ; 1.122  ; 0.000         ;
 ; pll_audio|pll_audio_inst|altera_pll_i|general[0].gpll~FRACTIONAL_PLL|vcoph[0]     ; 1.196  ; 0.000         ;
 ; emu|pll|pll_inst|altera_pll_i|general[0].gpll~FRACTIONAL_PLL|vcoph[0]             ; 1.666  ; 0.000         ;
-; pll_hdmi|pll_hdmi_inst|altera_pll_i|cyclonev_pll|counter[0].output_counter|divclk ; 1.929  ; 0.000         ;
-; sysmem|fpga_interfaces|clocks_resets|h2f_user0_clk                                ; 3.589  ; 0.000         ;
-; spi_sck                                                                           ; 4.203  ; 0.000         ;
-; emu|pll|pll_inst|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk           ; 8.565  ; 0.000         ;
-; FPGA_CLK2_50                                                                      ; 9.204  ; 0.000         ;
-; FPGA_CLK1_50                                                                      ; 9.212  ; 0.000         ;
+; pll_hdmi|pll_hdmi_inst|altera_pll_i|cyclonev_pll|counter[0].output_counter|divclk ; 1.931  ; 0.000         ;
+; sysmem|fpga_interfaces|clocks_resets|h2f_user0_clk                                ; 3.588  ; 0.000         ;
+; spi_sck                                                                           ; 4.261  ; 0.000         ;
+; emu|pll|pll_inst|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk           ; 8.563  ; 0.000         ;
+; FPGA_CLK2_50                                                                      ; 9.207  ; 0.000         ;
+; FPGA_CLK1_50                                                                      ; 9.209  ; 0.000         ;
 ; FPGA_CLK3_50                                                                      ; 9.730  ; 0.000         ;
-; pll_audio|pll_audio_inst|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk   ; 18.930 ; 0.000         ;
+; pll_audio|pll_audio_inst|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk   ; 18.906 ; 0.000         ;
 +-----------------------------------------------------------------------------------+--------+---------------+
 

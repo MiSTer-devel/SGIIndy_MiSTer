@@ -169,7 +169,9 @@ module sgi_indy #(
     // cpu_powerdown switching the supply off, after which it loops forever.
     // cpu_hold is the top level's answer: the CPU alone back in reset, every
     // device left running so the display timing stays up (VC2 loses its
-    // tables in reset) and the top level can paint the "powered off" screen.
+    // tables in reset). On the board the CPU is released again at once and
+    // the PROM, finding PANEL bit 0 clear, shows "Okay to power off the
+    // system now" - see sgiindy.sv for what is and is not understood there.
     input  logic        cpu_hold,
     output logic        power_off,
 
