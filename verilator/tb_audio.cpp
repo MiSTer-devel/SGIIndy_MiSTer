@@ -19,6 +19,10 @@
 //        doublewords: a stereo frame split across a descriptor boundary
 //    T6  stopping a running channel with ch_act_ld: output silent, bp still
 //    T7  the OSD's switch off: REV says absent, the DAC says nothing
+//    T8  IRIX 6.5's a2_dd parks a clock generator (inc 0, modctrl 0xFFFF) and
+//        then forces a 16-byte EOX frame through codec A's channel and spins
+//        until the channel goes inactive: the parked generator must still
+//        clock the port, at its master rate
 //
 //  Build:  make -C verilator audiotest
 //============================================================================
@@ -446,6 +450,46 @@ int main(int argc, char **argv)
     check("the DAC goes silent (left)", b.t->audio_l, 0);
     check("the DAC goes silent (right)", b.t->audio_r, 0);
 
+    // ---- T8 a parked generator still clocks (IRIX 6.5 a2_dd) ---------------------
+    // hal2_write_clockgen, on a master-clock change, writes BRES inc 0 /
+    // modctrl 0xFFFF before the new master select, and rewrites inc/mod only if
+    // they differ from what it wrote last time; force_dma_frame then starts a
+    // 16-byte EOX descriptor on PBUS channel 0 and spins until ISACT clears.
+    // mod = inc - modctrl - 1 = 0, and acc + inc >= 0 is a clock on every master
+    // tick. A model that stops the generator instead hangs the kernel there -
+    // which is what IRIX 6.5's first playaifc did on build 61.
+    printf("T8 parked generator: inc 0 / modctrl 0xFFFF still clocks codec A\n");
+    b.reset();
+    {
+        const uint32_t BUF8 = 0x500000, D8 = 0x580000;
+        for (int i = 0; i < 4; i++) b.wr32m(BUF8 + 4 * i, 0);
+        b.wr32(Bench::H_ISR, 0x18);
+        b.iwr(0x1404, 0x0210);                           // codec A: ch 0, BRES2, stereo
+        b.iwr(0x2204, 0);                                // BRES2 master 48 kHz
+        b.iwr(0x2208, 1, 0xFFFF);                        // inc 1, mod 1
+        b.iwr(0x9104, 0x0008);                           // codec A on
+        b.run(CLK_HZ / 48000 * 8);
+        uint32_t f0 = (uint32_t)(b.t->audio0 >> 32);
+        b.iwr(0x2208, 0, 0xFFFF);                        // the park
+        b.iwr(0x2204, 1);                                // new master: 44.1 kHz
+        b.run(CLK_HZ / 44100 * 20);
+        uint32_t f1 = (uint32_t)(b.t->audio0 >> 32);
+        printf("  %u frames counted over 20 parked master periods\n", f1 - f0);
+        check_true("codec A keeps taking frames while parked", f1 - f0 >= 10);
+        b.desc(D8, BUF8, 16, 0, true);                   // force_dma_frame's frame
+        b.start(0, D8);
+        uint64_t g = 0;
+        while ((b.rd32(Bench::ctrl(0)) & 2) && g < 40) { b.run(CLK_HZ / 44100); g++; }
+        printf("  forced frame drained after %llu master periods\n", (unsigned long long)g);
+        check("the forced frame drains and channel 0 goes inactive",
+              b.rd32(Bench::ctrl(0)) & 2, 0);
+        b.iwr(0x2208, 0, 0x0001);                        // inc 0, mod 0xFFFE: stopped
+        uint32_t f2 = (uint32_t)(b.t->audio0 >> 32);
+        b.run(CLK_HZ / 44100 * 20);
+        check("inc 0 with a non-zero mod gives no clock",
+              (uint32_t)(b.t->audio0 >> 32) - f2, 0);
+    }
+
     // ---- T7 the OSD's switch ------------------------------------------------------
     printf("T7 audio off\n");
     b.t->audio_en = 0;
@@ -455,6 +499,7 @@ int main(int argc, char **argv)
     b.iwr(0x2204, 0);
     b.iwr(0x1404, 0x0210);
     b.iwr(0x9104, 0x0008);
+    b.run(300);                                          // the activation fetch lands first
     uint32_t bpo = b.rd32(Bench::bp(0));
     b.run(CLK_HZ / 48000 * 20);
     check("with audio off codec A does not take samples", b.rd32(Bench::bp(0)), bpo);

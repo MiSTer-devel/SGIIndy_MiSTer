@@ -443,10 +443,19 @@ module hal2 #(
                 md = bres_inc[i] - bres_modctrl[i] - 16'd1;
                 na = b_acc[i] + {1'b0, bres_inc[i]};
                 btick[i] <= 1'b0;
+                // NO SPECIAL CASE FOR mod == 0 OR inc == 0. This used to stop
+                // the generator for either, and IRIX 6.5 hung on it: a2_dd's
+                // hal2_write_clockgen PARKS a generator with inc 0 / modctrl
+                // 0xFFFF - mod = inc - modctrl - 1 = 0 - before a master
+                // change, rewrites inc/mod only if they changed, and
+                // force_dma_frame then spins until a 16-byte frame drains
+                // through codec A. acc + inc >= 0 is a clock on every master
+                // tick, so a parked generator runs at its master rate, and the
+                // frame drains; inc 0 with a non-zero mod still never clocks,
+                // as the arithmetic says. (tb_audio T8; IRIS keeps the old
+                // rate until the port is re-armed, which hides it there.)
                 if (mt) begin
-                    if (md == 16'd0 || bres_inc[i] == 16'd0) begin
-                        b_acc[i] <= 17'd0;
-                    end else if (na >= {1'b0, md}) begin
+                    if (na >= {1'b0, md}) begin
                         btick[i] <= 1'b1;
                         // Never more than one clock per master tick; a
                         // setting faster than its master just runs at it.
