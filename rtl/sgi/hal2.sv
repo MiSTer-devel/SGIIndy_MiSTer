@@ -155,6 +155,20 @@ module hal2 #(
     // Output volume, PIO channel 2. 255 is full level.
     logic  [7:0] vol_r, vol_l;
 
+    // THE AES CHIPS' CONTROL BYTES, PIO channel 1 (0x1FBD8400): the receiver's
+    // 32 registers at +0x00..+0x7C, the transmitter's at +0x80..+0xFC, one
+    // byte every four. IRIX 6.5's a2_dd (/usr/cpu/sysgen/IP22boot/a2_dd.o)
+    // tests them by writing and reading back, and gives up on audio
+    // altogether - "audio: AES receiver not responding.", hal2_init returns
+    // before creating the device, the desktop is silent - when they read 0:
+    //   hal2_init_aesrx: 0xAB -> RX +0x0C, 0x01 -> RX +0x08
+    //   hal2_init_aestx: 0x00 -> TX +0x04, 0x09 -> TX +0x0C, 0x83 -> TX +0x08
+    // 5.3's kdsp_a2 only ever wrote this window. These five are the bytes
+    // anything reads back; every other register still reads 0, which in the
+    // receiver's status registers (+0x00, +0x04) says no AES input is locked,
+    // the truth for this machine.
+    logic  [7:0] aes_rx08, aes_rx0c, aes_tx04, aes_tx08, aes_tx0c;
+
     // ISR is read-only in its low two bits and read/write in the three above.
     wire [15:0] isr_rd = {11'h0, isr, 2'b00};
 
@@ -182,9 +196,17 @@ module hal2 #(
         end else if (win == 2'd2 && dsel == 5'd0) begin
             rdata0 = {8'h0, vol_r};
             rdata1 = {8'h0, vol_l};
+        end else if (win == 2'd1) begin
+            // See aes_rx08: +0x08/+0x0C is doubleword 1, +0x84 the second half
+            // of doubleword 16, +0x88/+0x8C doubleword 17.
+            case (dsel)
+                5'd1:  begin rdata0 = {8'h0, aes_rx08}; rdata1 = {8'h0, aes_rx0c}; end
+                5'd16: begin                            rdata1 = {8'h0, aes_tx04}; end
+                5'd17: begin rdata0 = {8'h0, aes_tx08}; rdata1 = {8'h0, aes_tx0c}; end
+                default: ;
+            endcase
         end
-        // The AES and synth windows read zero. kdsp_a2 only writes them (its
-        // read-backs were compiled away), and the PROM does not look.
+        // The synth window reads zero; nothing reads it back.
     end
 
     // One indirect register as its two 16-bit words, for a read.
@@ -242,11 +264,26 @@ module hal2 #(
             iar   <= 16'h0;
             vol_r <= 8'hFF;
             vol_l <= 8'hFF;
+            aes_rx08 <= 8'h0;
+            aes_rx0c <= 8'h0;
+            aes_tx04 <= 8'h0;
+            aes_tx08 <= 8'h0;
+            aes_tx0c <= 8'h0;
             for (int i = 0; i < 4; i++) idr[i] <= 16'h0;
         end else begin
             if (sel && we && win == 2'd2 && dsel == 5'd0) begin
                 if (wsel) vol_l <= wdata[7:0];
                 else      vol_r <= wdata[7:0];
+            end
+            if (sel && we && win == 2'd1) begin
+                case ({dsel, wsel})
+                    {5'd1,  1'b0}: aes_rx08 <= wdata[7:0];
+                    {5'd1,  1'b1}: aes_rx0c <= wdata[7:0];
+                    {5'd16, 1'b1}: aes_tx04 <= wdata[7:0];
+                    {5'd17, 1'b0}: aes_tx08 <= wdata[7:0];
+                    {5'd17, 1'b1}: aes_tx0c <= wdata[7:0];
+                    default: ;
+                endcase
             end
             if (w_core) begin
                 case (regsel)
