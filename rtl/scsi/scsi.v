@@ -781,7 +781,17 @@ endfunction
 wire [31:0] data_cnt_next = data_cnt + 32'd1;
 wire [31:0] data_cnt_next2 = data_cnt + 32'd2;
 wire [31:0] data_cnt_next3 = data_cnt + 32'd3;
-wire [7:0] inquiry_dout       = inquiry_byte(data_cnt);
+// SGI: A LUN WITH NOTHING ON IT ANSWERS INQUIRY WITH 0x7F - peripheral
+// qualifier 3, "the target cannot support a device at this logical unit".
+// This target used to ignore the LUN and answer the same INQUIRY on all
+// eight, so IRIX's probe found the disk at ID 1 eight times (hinv: unit 1,
+// lun 1..7; the desktop: Disk(0,1,1)..Disk(0,1,7)) and the CD-ROM as
+// CDROM..CDROM8. Only byte 0 changes; the rest of the reply is what a real
+// drive sends for an unsupported LUN anyway. lun_absent is driven beside
+// msg_extra below, where IDENTIFY and the CDB are captured.
+wire lun_absent;
+wire [7:0] inquiry_dout       = (lun_absent && (data_cnt == 32'd0)) ? 8'h7F
+                               : inquiry_byte(data_cnt);
 wire [7:0] inquiry_dout_next  = inquiry_byte(data_cnt_next);
 wire [7:0] inquiry_dout_next2 = inquiry_byte(data_cnt_next2);
 wire [7:0] inquiry_dout_next3 = inquiry_byte(data_cnt_next3);
@@ -2106,6 +2116,22 @@ always @(posedge clk) begin
 	if(rst || (phase == PHASE_IDLE)) msg_extra <= 1'b0;
 	else if(stb_ack && (phase == PHASE_MSG_OUT) && !din[7]) msg_extra <= 1'b1;
 end
+
+// SGI: the logical unit this connection addresses. IDENTIFY (bit 7 set)
+// carries it in bits 2:0 - the WD33C93B sends one from its TARGET LUN
+// register on every Select-with-ATN, which is how IRIX probes LUNs 1-7. A
+// selection without ATN has no IDENTIFY, and then the SCSI-1 field, CDB
+// byte 1 bits 7:5, names it. Only the first IDENTIFY of a connection counts.
+reg [2:0] id_lun   = 3'd0;
+reg       id_lun_v = 1'b0;
+always @(posedge clk) begin
+	if(rst || (phase == PHASE_IDLE)) id_lun_v <= 1'b0;
+	else if(stb_ack && (phase == PHASE_MSG_OUT) && din[7] && !id_lun_v) begin
+		id_lun   <= din[2:0];
+		id_lun_v <= 1'b1;
+	end
+end
+assign lun_absent = id_lun_v ? (id_lun != 3'd0) : (cmd[1][7:5] != 3'd0);
 
 always @(posedge clk) begin
 	if(phase == PHASE_IDLE) cmd_cnt <= 4'd0;

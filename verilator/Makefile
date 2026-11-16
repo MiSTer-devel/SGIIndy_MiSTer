@@ -220,6 +220,15 @@ tb_scsidma:
 	   tb_scsidma.sv $(SDMA)
 	./obj_dir_tbsdma/tb_scsidma
 
+# --- scsi.v's INQUIRY per logical unit ---------------------------------------
+# A disk target selected with IDENTIFY LUN 1..7 (or a SCSI-1 CDB LUN) must
+# answer INQUIRY byte 0 = 0x7F, or IRIX's probe sees the disk eight times.
+#   make -C verilator tb_scsi_lun
+tb_scsi_lun:
+	$V --binary --timing $(TBC_W) +incdir+$(RTL)/scsi -fno-gate --top-module tb_scsi_lun \
+	   --Mdir ./obj_dir_tbslun -o tb_scsi_lun tb_scsi_lun.sv $(RTL)/scsi/scsi.v $(RTL)/scsi/cd_audio.sv
+	./obj_dir_tbslun/tb_scsi_lun
+
 # --- ram_arb's instruction prefetch buffer against a memory with contents -----
 # Every word handed to the CPU must be what memory held, with the CPU storing
 # into the buffered lines and a DMA master writing underneath (build 46).
