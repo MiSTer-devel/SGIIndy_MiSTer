@@ -7,24 +7,25 @@ the SCSI images, the keyboard, the mouse and the clock, the SCC on the board's
 UART, and VC2's raster to the scaler. This is how each of those is wired, and
 why.
 
-The current release is `releases/SGIIndy_20261028.rbf` (build 59, dated
-261028) with `releases/boot.rom`: a 128 KB second-level cache in block RAM
+The current release is `releases/SGIIndy_20261116.rbf` (build 63, dated
+261116) with `releases/boot.rom`: a 128 KB second-level cache in block RAM
 (docs/design/cache-fill-latency.md sections 9-10), Ethernet (`ec0` on the
 MiSTer's network) and disk writes buffered by Main_MiSTer in place of the
-FPGA's SCSI block cache, on top of build 51b. Ethernet and the write buffer
-need a Main_MiSTer with the SGI Indy support (`support/sgi`).
+FPGA's SCSI block cache, IRIX 6 soft power-off (build 60), and the IRIX 6.5.22
+fixes of builds 61-63: kernel fetches from KSEG2 with Status.KX set, HAL2's
+AES read-back and parked clock generators, LUN 1-7 answering "no device", and
+a one-track data TOC from the CD-ROM. Ethernet and the write buffer need a
+Main_MiSTer with the SGI Indy support (`support/sgi`).
 It was built with Quartus Prime Lite 17.0.2 **on the Linux build machine
-(m900)** at fitter seed 2 (seed 3, the one `sgiindy.qsf` keeps, missed the HDMI
-clock by 0.5 ns on this build): 36,388 of 41,910 ALMs (87 %), 533 of 553
-M10K blocks, 61 of 112 DSP blocks, and timing met in every check - worst
-setup slack +0.245 ns on the 50 MHz core clock and +0.302 ns on the HDMI
-pixel clock. `SEED=2 BUILD_DATE=261028 bash scripts/build.sh` on that machine
-rebuilds it; Quartus on Windows places the same inputs differently, so a
-bitstream is only bit-identical on the machine that built it. The earlier
-releases `SGIIndy_20260928.rbf` (build 50, seed 5, m900), `SGIIndy_20260927.rbf`
-(build 48, seed 5, m900) and `SGIIndy_20260918.rbf` (build 44, seed 1, built on
-Windows) stay in `releases/` beside it; the interim builds 51b and 54 of this
-branch (SGIIndy_20261023 and _20261025) were folded into it. `scripts/build.sh` writes that report into `reports/` after every
+(m900)** at fitter seed 3: 36,627 of 41,910 ALMs (87 %), and timing met in
+every check - worst setup slack +0.196 ns. `SEED=3 BUILD_DATE=261116 bash
+scripts/build.sh` on that machine rebuilds it; Quartus on Windows places the
+same inputs differently, so a bitstream is only bit-identical on the machine
+that built it. The earlier releases `SGIIndy_20260928.rbf` (build 50, seed 5,
+m900), `SGIIndy_20260927.rbf` (build 48, seed 5, m900) and
+`SGIIndy_20260918.rbf` (build 44, seed 1, built on Windows) stay in
+`releases/` beside it; the interim builds of this branch (SGIIndy_20261023,
+_20261025, _20261028 and _20261029) were folded into it. `scripts/build.sh` writes that report into `reports/` after every
 compile; [deploy-and-debug.md](deploy-and-debug.md#building) has the flow.
 
 ## The map
@@ -551,7 +552,7 @@ The comment above the writer in `sgiindy.sv` is the authoritative bit map.
 ## Installing a release
 
 ```
-/media/fat/_Computer/SGIIndy_20261028.rbf   the core, in any "_" folder
+/media/fat/_Computer/SGIIndy_20261116.rbf   the core, in any "_" folder
 /media/fat/games/SGIIndy/boot.rom           the PROM: releases/boot.rom
 ```
 

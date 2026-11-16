@@ -37,9 +37,25 @@ programs drawn by a reimplementation of the Newport (XL) graphics board.
 
 **IRIX 6 shutdown used to wait for ever.** "The system is shutting down"
 stayed on screen because the kernel was waiting for the power to go away and
-the core never switched it off. Since release 20261029 the shutdown ends at
+the core never switched it off. Since build 60 the shutdown ends at
 the PROM's "Okay to power off" dialog or a dark purple screen (see *Using
 IRIX*).
+
+**IRIX 6.5.22 panicked at every boot.** Unloading a kernel module ran code in
+mapped kernel space (KSEG2) with 64-bit addressing on, and the CPU fetched it
+as if it were unmapped. Fixed; 6.5.22 boots to the desktop.
+
+**IRIX 6.5 had no sound, then hung playing one.** Its audio driver reads back
+AES registers the core did not keep, and parks a clock generator the core
+treated as stopped. Both fixed; sound plays under 6.5 and 5.3.
+
+**Every disk appeared eight times.** Each SCSI disk answered for all eight
+logical units, so `hinv` and the desktop listed it at LUN 0 to 7. Units 1-7 now
+report "no device".
+
+**IRIX 6.2 called every CD an audio CD.** The CD-ROM drive returned an empty
+table of contents. It now reports one data track, and 6.2, 6.5 and 5.3 all
+mount the disc at `/CDROM`.
 
 **CD reads could come back with a byte wrong.** Installing IRIX from the CD,
 `inst`'s checksums caught one file with the last word of a disk block damaged,
