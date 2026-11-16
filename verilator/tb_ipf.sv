@@ -56,7 +56,7 @@ ram_arb dut (
     .cpu_req(cpu_req), .cpu_we(cpu_we), .cpu_addr(cpu_addr), .cpu_wdata(cpu_wdata),
     .cpu_be(cpu_be), .cpu_burst(cpu_burst), .cpu_wdata3(cpu_wdata3),
     .cpu_ifill(cpu_ifill), .pf_enable(pf_enable),
-    .cpu_dfill(cpu_dfill), .dpf_enable(dpf_enable),
+    .cpu_dfill(cpu_dfill), .dpf_enable(dpf_enable), .ext_inval(1'b0),
     .cpu_ack(cpu_ack), .cpu_last(cpu_last), .cpu_rdata(cpu_rdata),
     .dma_req(dma_req), .dma_we(dma_we), .dma_addr(dma_addr), .dma_wdata(dma_wdata),
     .dma_be(dma_be), .dma_ack(dma_ack), .dma_granted(dma_granted),

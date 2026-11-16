@@ -30,9 +30,6 @@ module sim_top
     // command line rather than by rebuilding. Both on for a normal run.
     input  wire        icache_en,
     input  wire        dcache_en,
-    // The SCSI block cache's OSD bypass (docs/design/scsi-block-cache.md): --scsi-nocache sets it,
-    // and a run with it on is the pre-build-26 block path, sector by sector.
-    input  wire        scsi_cache_bypass,
     // The OSD's audio switch. Off by default in the harness (--audio sets it):
     // with it on the PROM plays its startup tune, which costs every PROM
     // regression millions of cycles of DMA it is not there to test.
@@ -40,9 +37,21 @@ module sim_top
     // ram_arb's instruction prefetch buffer (build 46); --no-ipf clears it.
     input  wire        ipf_en,
     input  wire        dpf_en,       // --no-dpf: its data buffer (build 47)
+    input  wire        l2_en,        // --no-l2: the second-level cache (build 56)
     output wire [15:0] audio_l,
     output wire [15:0] audio_r,
     output wire [63:0] audio0, audio1, audio2,
+
+    // Main's port into the Ethernet window (sgi_hpc3.sv), for a harness that
+    // plays Main's sgi_enet; all zero, the window is only the guest's.
+    input  wire        ex_rd,
+    input  wire        ex_wr,
+    input  wire  [8:0] ex_idx,
+    input  wire [15:0] ex_seq,
+    input  wire [31:0] ex_wdata,
+    output wire [31:0] ex_rdata,
+    output wire        ex_done,
+    input  wire        ex_inval,
 
     // Serial receive for the console channel. Idle mark is 1; the GUI harness
     // shifts typed characters out on it so the Command Monitor can be driven.
@@ -207,11 +216,11 @@ module sim_top
         .boot_pc       (boot_pc),
         .icache_en     (icache_en),
         .dcache_en     (dcache_en),
-        .scsi_cache_bypass(scsi_cache_bypass),
         .scsi_din_lookahead(1'b1),
         .scsi_din_strict(1'b1),
         .ipf_enable(ipf_en),
         .dpf_enable(dpf_en),
+        .l2_enable (l2_en),
 
         .ps2_key       (ps2_key),
         .ps2_mouse     (ps2_mouse),
@@ -265,10 +274,20 @@ module sim_top
         // to run and can be compared against a control.
         .host_rtc      (65'd0),
         .dbg_raw_index (1'b0),   // --fbindex does this in C++, on the dump
+        .cpu_hold      (1'b0),   // the soft power-off is sgiindy.sv's business
+        .power_off     (),
         .audio_en      (audio_en),
         .audio_l       (audio_l),
         .audio_r       (audio_r),
         .dbg_audio_bcn (audio_bcn),
+        .ex_rd         (ex_rd),
+        .ex_wr         (ex_wr),
+        .ex_idx        (ex_idx),
+        .ex_seq        (ex_seq),
+        .ex_wdata      (ex_wdata),
+        .ex_rdata      (ex_rdata),
+        .ex_done       (ex_done),
+        .ex_inval      (ex_inval),
 
         .fbw_req       (fbw_req),
         .fbw_we        (fbw_we),

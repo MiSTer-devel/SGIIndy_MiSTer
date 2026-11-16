@@ -21,6 +21,7 @@ of each field - the bit maps live next to the assemblies):
       w16 {hps transactions rd, wr}  w17 {hps busy, target wait} (x64 cycles)
       w18 {cache hits, misses}       w19 {DATA-phase bytes, bus busy (x64)}
       w20 {DATA-phase time (x64), sectors written into the cache}
+      (w18 and w20's low half were the block cache's; zero since build 52)
 
 The heartbeat moving proves the writer is alive; the counters moving tell
 which recovery events actually happen during the 60 s retry loop; the sticky

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 #
-# cdread.sh --mode on|off [--mb N] [--tag T] [--fresh PRISTINE.img] - read N
-# megabytes off the CD-ROM under IRIX on the board and report what the SCSI
-# block cache did with it (docs/design/scsi-block-cache.md §6).
+# cdread.sh [--mb N] [--tag T] [--fresh PRISTINE.img] - read N megabytes off
+# the CD-ROM under IRIX on the board and report the SCSI disk-time counters
+# for it (docs/design/scsi-block-cache.md §6; --mode on|off went with the
+# block cache in build 52).
 #
 # The recipe is scripts/hinv.sh's: boot IRIX, wait for the login chooser,
 # park the pointer by the docs/45 recipe, log in as root, and type into the
@@ -15,33 +16,30 @@
 # the MEASUREMENT is the DDR3 beacon's disk-time counters (bcnread.py
 # --stats), sampled every 5 s until the DATA-phase byte count stops moving:
 # the deltas are the read's bytes, hps_io transactions, target wait, bus and
-# DATA-phase seconds, and cache hits/misses; the wall time is the span of the
-# polls that saw the count move. --mode sets the OSD switch first
-# (scripts/setopt.sh scsicache=), so the same bitstream measures both ways.
+# DATA-phase seconds; the wall time is the span of the polls that saw the
+# count move.
 # The machine is halted (init 0) at the end so the image stays clean.
 #
 # --sum copies the read into /tmp/cd.bin on the disk, runs IRIX's `sum` on
 # it into /cdsum.txt, lifts that file off the image after the halt
 # (efsread.py) and compares it with the same checksum computed over the
 # ISO's first N MB on the device: the one proof that the bytes the guest got
-# through the cache are the disc's. (Not a pipe: a `|` typed through the
+# are the disc's. (Not a pipe: a `|` typed through the
 # ws API never reaches IRIX's shell as one - two runs with `dd ... | sum`
 # moved no CD bytes at all, 2026-09-08.) 16 MB is plenty for that.
 #
-#   bash scripts/cdread.sh --mode on  --tag b27 --mb 64
-#   bash scripts/cdread.sh --mode off --tag b27 --mb 64
-#   bash scripts/cdread.sh --mode on  --tag b27 --mb 16 --sum
+#   bash scripts/cdread.sh --tag b52 --mb 64
+#   bash scripts/cdread.sh --tag b52 --mb 16 --sum
 set -u
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" || exit 1
 if [ -r scripts/local.env ]; then . scripts/local.env; fi
 : "${MISTER_HOST:?}"; : "${MISTER_SSH_KEY:?}"; : "${MISTER_SSH_USER:=root}"
 : "${MISTER_CORE_FOLDER:=_Unstable}"; : "${RBF_REMOTE:=SGIIndy.rbf}"
 : "${MISTER_HTTP_PORT:=8182}"
-MODE=""; MB=64; TAG="cd"; FRESH=""; SUM=0
+MB=64; TAG="cd"; FRESH=""; SUM=0
 IMG="/media/fat/games/${MISTER_GAMES_DIR:-SGIIndy}/SGIIndy53.img"
 while [ $# -gt 0 ]; do
     case "$1" in
-        --mode)  MODE="$2"; shift ;;
         --mb)    MB="$2"; shift ;;
         --tag)   TAG="$2"; shift ;;
         --fresh) FRESH="$2"; shift ;;
@@ -51,7 +49,6 @@ while [ $# -gt 0 ]; do
     esac
     shift
 done
-[ "$MODE" = on ] || [ "$MODE" = off ] || { echo "--mode on|off is required" >&2; exit 2; }
 export MSYS_NO_PATHCONV=1
 DBG="/media/fat/sgidbg"
 rsh() { ssh -o StrictHostKeyChecking=no -o ConnectTimeout=15 -i "$MISTER_SSH_KEY" "$MISTER_SSH_USER@$MISTER_HOST" "$@"; }
@@ -59,7 +56,7 @@ push() { scp -q -o StrictHostKeyChecking=no -i "$MISTER_SSH_KEY" "$1" "$MISTER_S
 ws() { python tools/misterdeploy/ws_send.py --host "$MISTER_HOST" --port "$MISTER_HTTP_PORT" "$@" >/dev/null 2>&1; }
 say() { echo "[$(date +%H:%M:%S)] $*"; }
 mkdir -p tests/out/hw
-LOG="tests/out/hw/cdread-$TAG-$MODE.log"; [ "$SUM" = 1 ] && LOG="tests/out/hw/cdread-$TAG-$MODE-sum.log"
+LOG="tests/out/hw/cdread-$TAG.log"; [ "$SUM" = 1 ] && LOG="tests/out/hw/cdread-$TAG-sum.log"
 stats() { rsh "python3 $DBG/bcnread.py --stats" 2>&1 | tail -1; }
 # the DATA-phase byte count out of a stats line, in whole bytes
 bytes_of() { echo "$1" | sed -n 's/.*data=[0-9.]*s \([0-9.]*\)MB.*/\1/p' | awk '{printf "%d", $1 * 1000000}'; }
@@ -69,7 +66,6 @@ for f in tools/misterdeploy/ddr3_peek.py tools/misterdeploy/fb_poke.py \
          tools/misterdeploy/memclear.py tools/misterdeploy/irixstate.py \
          tools/misterdeploy/bcnread.py tools/misterdeploy/efsread.py; do push "$f"; done
 
-bash scripts/setopt.sh scsicache=$MODE >/dev/null || exit 1
 if [ -n "$FRESH" ]; then
     say "restoring $IMG from $FRESH"
     # Restore IN PLACE, with the image closed first. Renaming a fresh copy over
@@ -83,7 +79,7 @@ if [ -n "$FRESH" ]; then
     rsh "echo 'load_core /media/fat/menu.rbf' > /dev/MiSTer_cmd; for i in \$(seq 1 30); do ls -l /proc/[0-9]*/fd 2>/dev/null | grep -q '$IMG\$' || break; sleep 1; done; cp '$FRESH' '$IMG' && sync" || exit 1
 fi
 rsh "python3 $DBG/fb_poke.py fill 0xE7; python3 $DBG/memclear.py" >/dev/null 2>&1
-say "launching $(rsh "md5sum /media/fat/$MISTER_CORE_FOLDER/$RBF_REMOTE" | cut -c1-32), cache $MODE" | tee -a "$LOG"
+say "launching $(rsh "md5sum /media/fat/$MISTER_CORE_FOLDER/$RBF_REMOTE" | cut -c1-32)" | tee -a "$LOG"
 python tools/misterdeploy/launch_unstable_core.py \
     --host "$MISTER_HOST" --port "$MISTER_HTTP_PORT" \
     --folder "$MISTER_CORE_FOLDER" --core "$RBF_REMOTE" \
@@ -134,9 +130,9 @@ while :; do
 done
 S1=$(stats); B1=$(bytes_of "$S1")
 say "after:  $S1" | tee -a "$LOG"
-python - "$S0" "$S1" "$TT" "$TFIRST" "$TLAST" "$MB" "$MODE" <<'PY' | tee -a "$LOG"
+python - "$S0" "$S1" "$TT" "$TFIRST" "$TLAST" "$MB" <<'PY' | tee -a "$LOG"
 import re, sys
-s0, s1, tt, tf, tl, mb, mode = sys.argv[1:]
+s0, s1, tt, tf, tl, mb = sys.argv[1:]
 def parse(s):
     m = re.search(r"rd=(\d+) wr=(\d+) busy=([\d.]+)s \| target wait=([\d.]+)s \| bus busy=([\d.]+)s data=([\d.]+)s ([\d.]+)MB .*hits=(\d+) misses=(\d+) writes=(\d+)", s)
     if not m: sys.exit("cannot parse: " + s)
@@ -145,12 +141,11 @@ def parse(s):
 a, b = parse(s0), parse(s1)
 d = {k: b[k] - a[k] for k in a}
 wall = (int(tl) - int(tt)) if int(tf) else 0
-print("cdread %s MB cache %s: DATA %.2f MB in %.1f s of DATA phase (%.2f MB/s on the bus); "
+print("cdread %s MB: DATA %.2f MB in %.1f s of DATA phase (%.2f MB/s on the bus); "
       "wall ~%d s (%.2f MB/s to the guest, polled at 5 s); hps_io rd=%d wr=%d, HPS busy %.1f s; "
-      "target wait %.1f s; bus busy %.1f s; cache hits=%d misses=%d"
-      % (mb, mode, d["mb"], d["data"], (d["mb"] / d["data"]) if d["data"] else 0.0,
-         wall, (d["mb"] / wall) if wall else 0.0, d["rd"], d["wr"], d["hps"], d["wait"], d["bus"],
-         d["hits"], d["misses"]))
+      "target wait %.1f s; bus busy %.1f s"
+      % (mb, d["mb"], d["data"], (d["mb"] / d["data"]) if d["data"] else 0.0,
+         wall, (d["mb"] / wall) if wall else 0.0, d["rd"], d["wr"], d["hps"], d["wait"], d["bus"]))
 PY
 say "halting"
 ws "text:init 0" "sleep:0.3" "kbdRaw:28"

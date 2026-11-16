@@ -72,6 +72,22 @@ public:
         v0 = rd(R_IDR0);
         v1 = rd(R_IDR1);
     }
+    // PIO channel 1, the AES chips: a byte offset within the window is a
+    // doubleword (dsel) and a half (wsel), and a read takes the half the
+    // address names, as sgi_hpc3 does.
+    void aes_wr(int off, uint8_t v) {
+        t->win = 1; t->sel = 1; t->we = 1;
+        t->dsel = (off >> 3) & 31; t->wsel = (off >> 2) & 1; t->wdata = v;
+        tick();
+        t->sel = 0; t->we = 0; t->win = 0; t->wsel = 0;
+    }
+    uint16_t aes_rd(int off) {
+        t->win = 1; t->sel = 1; t->we = 0;
+        t->dsel = (off >> 3) & 31; t->eval();
+        uint16_t v = ((off >> 2) & 1) ? t->rdata1 : t->rdata0;
+        t->sel = 0; t->win = 0;
+        return v;
+    }
 };
 
 static int fails = 0;
@@ -171,6 +187,35 @@ int main(int argc, char **argv)
     d.ind_wr(T_DMA, 6, 1, 0x9999);
     d.ind_rd(T_DMA, N_CODECA, 1, a, b);
     check("unknown DMA number does not clobber codecA", a, (uint16_t)(0x1100 + N_CODECA));
+
+    // IRIX 6.5's a2_dd probes the AES chips by writing and reading back
+    // (hal2_init_aesrx, hal2_init_aestx), and with no answer it prints "AES
+    // receiver not responding." and creates no audio device at all. The
+    // sequence below is the driver's, in its order.
+    d.reset();
+    check("AES RX status +0x00 reads 0 (nothing locked)", d.aes_rd(0x00), 0);
+    check("AES RX status +0x04 reads 0", d.aes_rd(0x04), 0);
+    d.aes_wr(0x0C, 0xAB);
+    check("aesrx probe: 0xAB -> +0x0C reads back", d.aes_rd(0x0C) & 0xFF, 0xAB);
+    d.aes_wr(0x08, 0x01);
+    check("aesrx probe: 0x01 -> +0x08 reads back", d.aes_rd(0x08) & 0xFF, 0x01);
+    check("aesrx probe: +0x0C survives the +0x08 write", d.aes_rd(0x0C) & 0xFF, 0xAB);
+    for (int o = 0x90; o <= 0x9C; o += 4) d.aes_wr(o, 0x00);
+    for (int i = 0; i < 24; i++) d.aes_wr(0xA0 + 4 * i, (uint8_t)(0x40 + i));
+    d.aes_wr(0x84, 0x00);
+    check("aestx probe: 0x00 -> +0x84 reads back", d.aes_rd(0x84) & 0xFF, 0x00);
+    d.aes_wr(0x8C, 0x09);
+    check("aestx probe: 0x09 -> +0x8C reads back", d.aes_rd(0x8C) & 0xFF, 0x09);
+    d.aes_wr(0x88, 0x83);
+    check("aestx probe: 0x83 -> +0x88 reads back", d.aes_rd(0x88) & 0xFF, 0x83);
+    check("aestx probe: +0x8C survives the +0x88 write", d.aes_rd(0x8C) & 0xFF, 0x09);
+    check("aesrx bytes untouched by the transmitter's", d.aes_rd(0x0C) & 0xFF, 0xAB);
+    check("AES RX status +0x00 still 0 after the probes", d.aes_rd(0x00), 0);
+    // The windows stay apart: HAL2's own doubleword 1 is not the AES chip's.
+    d.wr(R_IDR0, 0x1234);
+    d.aes_wr(0x08, 0x55);
+    check("AES write leaves HAL2 IDR0 alone", d.rd(R_IDR0), 0x1234);
+    check("REV still reads 0x4010 beside the AES window", d.rd(R_REV), 0x4010);
 
     printf("\n%s\n", fails ? "FAILURES ABOVE" : "all checks passed");
     return fails ? 1 : 0;

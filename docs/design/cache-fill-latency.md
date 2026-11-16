@@ -369,3 +369,162 @@ interpreter lands in the instruction cache (7.5 to 18 instruction fills per
 **Next.** A posted line write in `ram_arb` (acknowledged when latched, the
 next read allowed past it with an address check) would hide the rest of a
 dirty miss; early restart would take ~5 clocks off every fill.
+
+## 9. A second level in block RAM (build 56)
+
+The fewer-trips item of §7, taken literally: `rtl/sgi/l2_cache.sv`, a 128 KB
+direct-mapped cache with 32-byte lines between `ram_arb` and the DDR3 port.
+Write-through, so DDR3 stays current and DMA needs nothing; every write issued
+through the port is merged into the line if it is held; only line fills look
+it up, everything else passes through in the same clock. An instruction fill
+that misses it bursts three lines as the buffer did (§8), a data fill on a
+stream too, and all three land in the cache, so the two buffers are off while
+it is on (`status[27]`, `setopt.sh l2=off`, is the A/B). Main's writes from
+the ARM are the one path around it; its `ext_inval` starts a 4096-clock sweep
+that invalidates every tag, during which a fill may hit only lines the sweep
+has passed and nothing fetched is kept. A hit presents its first word two
+clocks after the request (both RAMs have registered outputs) and one a clock
+after that; a miss is issued to the port in that same second clock.
+
+**The replay first** (`tools/l2sim.c`, the boot's itrace and dtrace through
+L1s as the core has them, then §8's buffers or a second level, interleaved by
+progress): the buffers answer 45.8 % of instruction fills - the board said
+43-48 % - and 59 % of data fills (the board said ~10 %: a boot trace is
+bzero and bcopy, a desktop is not). Behind them:
+
+| second level | I fills answered | D fills answered | DDR3 transactions vs today |
+|---|---:|---:|---:|
+| none (build 48 buffers) | 45.8 % | 59.2 % | 100 % |
+| DM 64 KB | 76.2 % | 81.2 % | 49.5 % |
+| **DM 128 KB** | **84.1 %** | **82.4 %** | **46.4 %** |
+| DM 256 KB | 89.0 % | 83.3 % | 44.0 % |
+| 2 x 64 KB | 87.3 % | 83.1 % | 44.7 % |
+
+128 KB is what fits beside the 397 M10Ks in use (553 on the device): 104 for
+the data in the densest shape - no byte enables, a partial store is read,
+merged and written back - and 8 for the tags. The data side is the figure to
+distrust; the instruction side is why this should show on the board where the
+data buffer did not.
+
+**Benches.** `make -C verilator l2test`: tb_ramarb_pf.cpp through
+`tb_l2_wrap.sv` (ram_arb + a 2 KB second level so the window evicts it)
+against the slow memory, four configurations including one-clock
+acknowledgements and an invalidate every ~50 clocks; its first run found a
+request ram_arb remembered for the second level being issued later with the
+other master's payload (ram_arb's port muxes followed `dma_go`, one clock
+wide - now the owner for the whole transaction). cpu-tests 2259/0 (246
+tests), run-prom, the IRIX 5.3 sim boot, both ram_arb benches.
+
+**On the board** (.143, 2026-10-28, build 56 seed 2 `a3553be1` against the same
+night's build 54 = SGIIndy_20261025, pristine IRIX 5.3 image, perfprobe):
+
+| | build 54 | **build 56** | |
+|---|---:|---:|---|
+| 60 x `/bin/ls /` | 3.57 s | **3.12 s** | 1.15x |
+| perl 200k loop | 11.55 s | **11.03 s** | 1.05x |
+| `bzip2 -9` of /unix | 79.6 s | **74.7 s** | 1.07x |
+| `ls -lR` into the Console | 5.05 s | **4.78 s** | 1.06x |
+| xterm start | 0.716 s | **0.686 s** | 1.04x |
+| rawdisk, xdpyinfo, launch to the X login (82 s) | same | same | not memory-bound |
+| clocks per instruction: fork / perl / bzip2 / scroll | 1.40 / 1.54 / 1.77 / 1.51 | **1.38 / 1.51 / 1.68 / 1.48** | |
+| an instruction fill, clocks on the bus | 13.1-13.5 | **9.4-11.4** | |
+| a data fill, clocks on the bus | 18.3-18.7 | **9.7-14.4** | |
+| the CPU's share of the DDR3 port (bzip2 / perl) | 16.3 % / 6.2 % | **7.7 % / 2.1 %** | |
+| fills answered on chip, whole workload window | 46 % of I (buffers) | **84.4 % of I, 53.4 % of D** | |
+
+The instruction side landed exactly where the replay put it (84.4 % against
+84.1 %); the data side at 53 % is the desktop, not the boot. Fit: 36,052 ALMs
+(86 %), 533 of 553 M10Ks (Quartus gave the data array 128 blocks, not the 104
+it could be), core +0.122 ns, HDMI +0.215 (seed 2; seed 3 missed HDMI by
+0.083). What is left in a HIT is now the point: with 84 % of instruction fills
+answered in ~7 clocks on the bus, the three clocks in front of `mem_request`,
+the registered RAM outputs (the tag could decide one clock earlier) and
+`S_FILLEND` (§7) are each worth more than they were when every fill paid 20.
+
+## 10. IRIS's benchmark suite on the board (builds 54, 56, 57)
+
+Dani asked for IRIS's own benchmark (`../iris/bench`: 46 bare-metal MIPS
+kernels, each checked against a golden checksum, built on the cpu-tests
+harness) on the core rather than in its emulator. It runs: the prebuilt
+`irisbench.elf` in a volume-header image (`mkvh build ... --bootfile irisbnch`,
+voldir names are eight characters) mounted as the system disk, booted from the
+PROM's command monitor with `boot -f dksc(0,1,8)irisbnch` (the autoboot wants
+`sash`, not the header's bootfile). It prints over the SCC, which on this core
+reaches the MiSTer's UART pins and nothing else, so the results are read out of
+guest RAM instead: `tools/misterdeploy/irisbench_results.py` decodes the
+harness's `results[]` table (`ddr3_peek.py` at 0x38000000 + its address; the
+suite is done when the PC parks in `testdev_exit`), `irisbench_compare.py`
+puts builds side by side. CP0 Count is 25 MHz here (PClock/2), the harness
+assumes 100 when it has no host clock, so its own rates would be 4x high.
+
+Same image, same evening, build 54 (SGIIndy_20261025) against the second
+level of §9 as fitted in build 56 (two RAM latencies to a hit) and build 57
+(one): work units per second of Count, every checksum ok.
+
+| kernel | build 54 | build 56 | build 57 | 57/54 |
+|---|---:|---:|---:|---:|
+| int/dhrystone (DMIPS) | 69.6 | 69.6 | 69.6 | 1.000 |
+| fpu/linpack (MFLOPS) | 3.33 | 3.48 | 3.51 | 1.053 |
+| fpu/matmul (Mflop/s) | 3.46 | 3.72 | 3.77 | 1.089 |
+| img/convolve3x3 (px/s) | 401 k | 559 k | 586 k | **1.460** |
+| vid/motion_est (SAD/s) | 12.7 k | 15.6 k | 15.9 k | 1.254 |
+| vid/yuv2rgb (px/s) | 430 k | 521 k | 533 k | 1.239 |
+| codec/lz (B/s) | 286 k | 302 k | 304 k | 1.063 |
+| img/sharpen5x5, rgb2ycbcr, rotate90 | | | | 1.04-1.06 |
+| int/*, fpu/scalar*, mem/latency_l1 (L1-resident) | | | | 1.000 |
+| mem/latency_l2 (256 KB chase), latency_dram (8 MB) | 1.884 M | 1.788 M | 1.823 M | 0.967 |
+| mem/copy, stream_copy/scale/triad | | 0.93-0.96 | | 0.97 |
+| mem/fill | 39.1 M | 37.5 M | 38.9 M | 0.993 |
+
+What it says: code that fits the 128 KB second level gains up to 1.46x, the
+L1-resident kernels are untouched (the sanity check), and anything that streams
+through memory pays the lookup on every miss - two clocks in build 56 (4-7 %),
+one in build 57 (1-3.5 %). The bench's "L2" chase is sized for a 1 MB cache
+(256 KB), so it cannot see ours. The last clock on a miss is the next trim,
+as is the sys/ group, which left no records on any build (the suite exits
+after 40 kernels; its message went to the UART).
+
+Raw tables: `tests/out/hw/irisbench/results{54,56b,57}.bin` (not committed).
+
+**Build 57 under IRIX, same night, same control** (perfprobe, pristine 5.3
+image): 60 x ls 3.57 -> 3.03 s (**1.18x**), `bzip2 -9` 79.6 -> 73.4 s (1.085x),
+`ls -lR` scroll 5.05 -> 4.66 s (1.085x), xterm2 1.10x, perl 11.55 -> 11.34 s
+(1.02x - this run drew 7.4 M instruction fills against 4.6 M, perl's placement
+lottery); rawdisk, xdpyinfo and launch-to-X (81 s) unchanged. Instruction fills
+8.2-9.6 clocks on the bus (build 54: 13.5), data fills 11-14 (18.5); CPI bzip2
+1.77 -> 1.66, fork 1.40 -> 1.36. **DISKCHECK PASS** (IRIX's sums of /unix, libc,
+libX11, libXm against the bytes on disk, and a byte-identical copy of /unix).
+Build 57 is the release candidate; build 56's own disk verdict was never
+obtained (two launcher failures), build 57 carries the same cache with one
+less wait state.
+
+**Build 58: a predicted miss skips the lookup** (`f20b962`; after a burst
+fetched L..L+2, the fill of L+3 on that side is issued in the clock it
+arrives). Fit seed 3: 36,155 ALMs, core +0.112 ns (the compare sits on the
+port-request path; build 57 had +1.565), HDMI +0.251. Bench, same image, same
+night: mem/fill 0.993 -> **1.000** and mem/unaligned 0.986 -> **1.000**, every
+other kernel within 0.1 % of build 57 - the read streams stay at 0.966-0.975.
+So the residual on streaming reads is not the miss path: in a stream two of
+every three fills HIT the lines the previous burst brought in and pay the
+L2's one-clock lookup, where build 54's two-line buffer answered them with
+none. Closing that needs a zero-latency buffer in front of the L2 (ram_arb's,
+fed by 12-word bursts the L2 would have to serve), not another cut inside it.
+Under IRIX build 58 is within run-to-run noise of build 57 (that bzip2 run
+drew 11 % more L1 data fills; per fill 13.5 -> 12.7 clocks); DISKCHECK PASS.
+Raw table `tests/out/hw/irisbench/results58.bin`.
+
+**Build 59: four predictions instead of one per side** (`46bb94c`). A copy
+is two interleaved streams and a triad three, so one "next miss" register per
+side was overwritten by the other stream every other fill; four entries (the
+line after each of the last four bursts, any side) follow them all. Fit seed 2:
+36,388 ALMs, core +0.245 ns (seed 3: core +1.122 but HDMI -0.526), HDMI
++0.302. Bench, same image, same night, against build 54: **no kernel below
+parity any more** - copy 1.003, stream_copy 1.011, scale 1.004, triad 1.004,
+the 256 KB and 8 MB chases 1.012, unaligned 1.015, random 1.004, resize
+1.006, composite 1.004 - and the wins unchanged (convolve3x3 1.456,
+motion_est 1.254, yuv2rgb 1.243, rotate90 1.047, LINPACK 3.51 MFLOPS).
+Under IRIX within run-to-run noise of 57/58; DISKCHECK PASS. So the read
+streams' residual was the miss path after all, for misses one predictor
+could not follow; the earlier guess at the hit path was wrong. Raw table
+`tests/out/hw/irisbench/results59.bin`. Released as `SGIIndy_20261028.rbf`
+(replacing builds 57 and 58 in that file the same day).

@@ -58,7 +58,8 @@ sgi_hpc3 dut (
     .scsi_dev_eop (1'b0), .scsi_dev_ack (), .scsi_dev_rdata (), .scsi_dev_reset (),
     .scsi_dma_irq (), .dbg_scsi0_dma (),
     // audio: fitted, but with no memory behind the PBUS engine it never plays
-    .audio_en (1'b1), .audio_l (), .audio_r (), .dbg_audio ()
+    .audio_en (1'b1), .audio_l (), .audio_r (), .dbg_audio (),
+    .ex_rd (1'b0), .ex_wr (1'b0), .ex_idx (9'd0), .ex_seq (16'd0), .ex_wdata (32'd0), .ex_rdata (), .ex_done (), .enet_irq ()
 );
 
 // ---- the map, as the spec gives it ----------------------------------------
@@ -68,9 +69,10 @@ localparam logic [18:0] HAL2_BASE   = 19'h58000, HAL2_END   = 19'h59000;
 localparam logic [18:0] CFGDMA_BASE = 19'h5C000, CFGDMA_END = 19'h5D000;
 localparam logic [18:0] CFGPIO_BASE = 19'h5D000, CFGPIO_END = 19'h5E000;
 localparam logic [18:0] WRONLY_BASE = 19'h5E000, WRONLY_END = 19'h60000;
+localparam logic [18:0] SEEQ_BASE   = 19'h54000, SEEQ_END   = 19'h54020;
 
 localparam int B_NONE = 0, B_DESC = 1, B_CTRL = 2, B_GEN = 3,
-               B_CFGDMA = 4, B_CFGPIO = 5, B_HAL2 = 6, B_WRONLY = 7;
+               B_CFGDMA = 4, B_CFGPIO = 5, B_HAL2 = 6, B_WRONLY = 7, B_SEEQ = 8;
 
 function automatic int blk_of(input logic [18:0] a);
     if (a < DMA_END)
@@ -80,6 +82,7 @@ function automatic int blk_of(input logic [18:0] a);
     else if (a >= CFGDMA_BASE && a < CFGDMA_END) blk_of = B_CFGDMA;
     else if (a >= CFGPIO_BASE && a < CFGPIO_END) blk_of = B_CFGPIO;
     else if (a >= WRONLY_BASE && a < WRONLY_END) blk_of = B_WRONLY;
+    else if (a >= SEEQ_BASE   && a < SEEQ_END)   blk_of = B_SEEQ;
     else                                         blk_of = B_NONE;
 endfunction
 
@@ -106,8 +109,19 @@ function automatic bit scsi0(input logic [18:0] a, input int blk);
 endfunction
 
 // Is the half's read data something this bench can predict?
+// THE ETHERNET WINDOW'S LIVE REGISTERS are not storage any more (build 53):
+// each CTRL reads its channel's ACTIVE and the SEEQ's status, RESET the
+// interrupt, and a start moves CRBDP or the TX first-descriptor pair. Their
+// behaviour is tb_enet's to check; here they are driven and only answered.
+function automatic bit enet_live(input logic [18:0] a, input bit w);
+    logic [18:0] r;
+    r = {a[18:3], w, 2'b00};
+    enet_live = (r == 19'h15004) || (r == 19'h15014) || (r == 19'h17004)
+             || (r == 19'h18000) || (r == 19'h1A000) || (r == 19'h1A004);
+endfunction
+
 function automatic bit known(input logic [18:0] a, input int blk, input bit w);
-    if (blk == B_HAL2 || scsi0(a, blk)) known = 0;
+    if (blk == B_HAL2 || blk == B_SEEQ || scsi0(a, blk) || enet_live(a, w)) known = 0;
     else if (blk == B_GEN && ({a[4:3], w} == 3'd0 || {a[4:3], w} == 3'd3))
         known = 0;                                   // the two halves of intstat
     else known = 1;
@@ -200,7 +214,7 @@ task automatic go(input bit we_i, input logic [18:0] a, input logic [2:0] aoff_i
     wr1 = |ben[3:0];
     new0 = merge(cur0, wd, ben, 1'b0);
     new1 = merge(cur1, wd, ben, 1'b1);
-    if (blk == B_HAL2 || blk == B_WRONLY || scsi0(a, blk)) return;   // not storage here
+    if (blk == B_HAL2 || blk == B_WRONLY || blk == B_SEEQ || scsi0(a, blk)) return;   // not storage here
     if (wr0) sh[key_of(a, blk, 1'b0)] = new0;
     if (wr1) sh[key_of(a, blk, 1'b1)] = new1;     // cfgdma/cfgpio: same key, this one wins
 endtask

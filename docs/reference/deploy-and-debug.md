@@ -166,10 +166,10 @@ everything else, so unset it before a `deploy.sh` meant to launch the copy it
 just put on the card.
 
 **Options without the OSD:** `bash scripts/setopt.sh name=value ...` writes the
-core's 128-bit status word into `/media/fat/config/SGIINDY.CFG`, which the
+core's 128-bit status word into `/media/fat/config/SGIINDY_v1.CFG`, which the
 framework reads once when the core starts — so relaunch afterwards. The names
-follow CONF_STR: `gfx=fitted|none`, `cache=on|off`, `mem=48|32|64`,
-`viddbg=off|raw`, `uartdbg=off|sys|ser`, `scsicache=on|off`. It writes the
+follow CONF_STR: `gfx=fitted|none`, `cache=on|off`, `mem=32|48|64|128`,
+`viddbg=off|raw`, `uartdbg=off|sys|ser`, `audio=on|off`, `swap=no|yes`. It writes the
 whole word, so every option not named — the aspect ratio included — goes back
 to its default.
 
@@ -365,8 +365,7 @@ names another image. Everything writes its logs under `tests/out/hw/`.
 | `clockprobe.sh [--fresh IMG] [--gap S] [--out FILE]` | asks IRIX the time twice, `GAP` seconds apart by the host's clock: the date at boot, and whether the clock runs at real speed |
 | `diskcheck.sh [--fresh IMG] [--out FILE]` | IRIX checksums files and copies one; `sumcheck.py` compares both with the image itself — DATA IN and DATA OUT |
 | `diskstress.sh [--copies N] [--wait S] [--out FILE] [--keep]` | copies `/unix` N times under a directory walk, then `efsdiff.py` looks for any block that changed without a write |
-| `cdread.sh --mode on\|off [--mb N] [--tag T] [--fresh IMG]` | reads N MB off the CD-ROM under IRIX with the SCSI block cache on or off |
-| `diskpair.sh RBF [--tag T] [--boots N]` | IRIX boots with the SCSI block cache on and then off, logging the disk-time counters |
+| `cdread.sh [--mb N] [--tag T] [--fresh IMG]` | reads N MB off the CD-ROM under IRIX and logs the SCSI disk-time counters |
 | `perfprobe.sh [--tag T] [--fresh IMG] [--no-boot] [--skip LIST]` | a fixed set of workloads typed into the Console, each timed by IRIX and profiled by `prof.py` |
 | `saverprobe.sh [--tag T] [--fresh IMG] [--no-boot] [--only LIST]` | runs the desktop's screen savers — X's line savers and the GL ones — grabbing the monitor three times through each |
 | `textprobe.sh TAG` | fills the Console with known glyphs and pulls both the screen and the frame buffer, for `tests/colcheck.py`; expects the bitstream staged at `/tmp/SGIIndy.rbf` |

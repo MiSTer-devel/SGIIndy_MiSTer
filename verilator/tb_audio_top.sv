@@ -54,6 +54,7 @@ module tb_audio_top #(
         .scsi_dev_eop (1'b0), .scsi_dev_ack (), .scsi_dev_rdata (), .scsi_dev_reset (),
         .scsi_dma_irq (), .dbg_scsi0_dma (),
         .audio_en (audio_en), .audio_l (audio_l), .audio_r (audio_r),
-        .dbg_audio (dbg)
+        .dbg_audio (dbg),
+        .ex_rd (1'b0), .ex_wr (1'b0), .ex_idx (9'd0), .ex_seq (16'd0), .ex_wdata (32'd0), .ex_rdata (), .ex_done (), .enet_irq ()
     );
 endmodule

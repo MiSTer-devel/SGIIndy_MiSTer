@@ -76,9 +76,9 @@ module sgi_indy #(
 
     // ---- SCSI block device ----------------------------------------------
     // One hps_io slot per target. On hardware these come from the HPS; in
-    // simulation from sim_blkdevice. Since docs/design/scsi-block-cache.md the block cache in
-    // sgi_scsi sits behind these: a transaction can be up to eight sectors
-    // (scsi_sd_blk_cnt = blocks - 1) streamed through the 13-bit address.
+    // simulation from sim_blkdevice. One transaction at a time across all of
+    // them (sgi_scsi's block port); scsi_sd_blk_cnt = blocks - 1 is 0 since
+    // the block cache went in build 52 (builds 26-51 streamed up to eight).
     input  logic  [6:0] scsi_img_mounted,
     input  logic [31:0] scsi_img_blocks,
     output logic [31:0] scsi_sd_lba [7],
@@ -89,9 +89,6 @@ module sgi_indy #(
     input  logic [12:0] scsi_sd_buff_addr,
     input  logic [15:0] scsi_sd_buff_dout,
     output logic [15:0] scsi_sd_buff_din [7],
-    // The OSD's "SCSI cache: Off" - every block request passes through the
-    // cache untouched, one sector per HPS transaction.
-    input  logic        scsi_cache_bypass,
     // The WD33C93B's DATA IN look-ahead (rtl/scsi/wd33c93.sv): on normally;
     // off is an instrument for the CD-install corruption hunt.
     input  logic        scsi_din_lookahead,
@@ -103,6 +100,9 @@ module sgi_indy #(
     input  logic        ipf_enable,
     // ...and its data buffer, which bursts only on a stream (build 47).
     input  logic        dpf_enable,
+    // The second-level cache (rtl/sgi/l2_cache.sv, build 56): on normally;
+    // while it is on the two buffers above are off (it does their bursts).
+    input  logic        l2_enable,
 
     // Megabytes of DRAM actually fitted. Drives the MC's bank decode; on
     // hardware this is a constant and folds away.
@@ -164,6 +164,17 @@ module sgi_indy #(
     // directly. A bring-up instrument; see rtl/newport/newport.sv.
     input  logic        dbg_raw_index,
 
+    // ---- soft power --------------------------------------------------------
+    // power_off is IOC PANEL bit 0 falling (sgi_ioc.sv): IRIX 6's
+    // cpu_powerdown switching the supply off, after which it loops forever.
+    // cpu_hold is the top level's answer: the CPU alone back in reset, every
+    // device left running so the display timing stays up (VC2 loses its
+    // tables in reset). On the board the CPU is released again at once and
+    // the PROM, finding PANEL bit 0 clear, shows "Okay to power off the
+    // system now" - see sgiindy.sv for what is and is not understood there.
+    input  logic        cpu_hold,
+    output logic        power_off,
+
     // ---- audio -----------------------------------------------------------
     // The OSD's audio switch: low, HAL2 reports itself absent and the machine
     // is what it was before it had a sample path (rtl/sgi/hal2.sv). The DAC
@@ -171,6 +182,18 @@ module sgi_indy #(
     input  logic        audio_en,
     output logic [15:0] audio_l,
     output logic [15:0] audio_r,
+
+    // ---- Ethernet: Main's port into the window (docs/design/ethernet-plan.md)
+    // From sgiindy.sv's UIO decoder; see sgi_hpc3.sv. ex_inval empties
+    // ram_arb's prefetch buffers after Main has written guest RAM.
+    input  logic        ex_rd,
+    input  logic        ex_wr,
+    input  logic  [8:0] ex_idx,
+    input  logic [15:0] ex_seq,
+    input  logic [31:0] ex_wdata,
+    output logic [31:0] ex_rdata,
+    output logic        ex_done,
+    input  logic        ex_inval,
 
     // ---- Newport's frame buffer -----------------------------------------
     // Two ports, because the frame buffer is VRAM: the rasteriser owns the
@@ -355,7 +378,7 @@ module sgi_indy #(
     r4300_wrap u_cpu (
         .clk              (clk),
         .ce               (ce),
-        .reset            (reset),
+        .reset            (reset | cpu_hold),
         .boot_pc          (boot_pc),
 
         .INSTRCACHEON     (icache_en),
@@ -594,6 +617,17 @@ module sgi_indy #(
     wire dma_port_ack;
     wire dma_grant;
 
+    // ram_arb's port side goes through the second-level cache (build 56) on
+    // its way to the real port; a hit never reaches ram_req.
+    wire        arb_ram_req, arb_ram_we, arb_ram_ifill, arb_ram_dfill;
+    wire [31:0] arb_ram_addr;
+    wire [63:0] arb_ram_wdata, arb_ram_rdata;
+    wire  [7:0] arb_ram_be;
+    wire  [3:0] arb_ram_burst;
+    wire [191:0] arb_ram_wdata3;
+    wire        arb_ram_ack, arb_ram_last;
+    wire l2_hit_i, l2_hit_d, l2_fill_i, l2_fill_d;
+
     ram_arb u_ram_arb (
         .clk        (clk),
         .reset      (reset),
@@ -606,9 +640,10 @@ module sgi_indy #(
         .cpu_burst  (bus_burst),
         .cpu_wdata3 (bus_wdata3),
         .cpu_ifill  (bus_ifill),
-        .pf_enable  (ipf_enable),
+        .pf_enable  (ipf_enable && !l2_enable),
         .cpu_dfill  (bus_dfill),
-        .dpf_enable (dpf_enable),
+        .dpf_enable (dpf_enable && !l2_enable),
+        .ext_inval  (ex_inval),
         .cpu_ack    (cpu_ram_ack),
         .cpu_last   (cpu_ram_last),
         .cpu_rdata  (cpu_ram_rdata),
@@ -621,16 +656,18 @@ module sgi_indy #(
         .dma_ack    (dma_port_ack),
         .dma_granted(dma_grant),
 
-        .ram_req    (ram_req),
-        .ram_we     (ram_we),
-        .ram_addr   (ram_addr),
-        .ram_wdata  (ram_wdata),
-        .ram_be     (ram_be),
-        .ram_burst  (ram_burst),
-        .ram_wdata3 (ram_wdata3),
-        .ram_rdata  (ram_rdata),
-        .ram_ack    (ram_ack),
-        .ram_last   (ram_last),
+        .ram_req    (arb_ram_req),
+        .ram_we     (arb_ram_we),
+        .ram_addr   (arb_ram_addr),
+        .ram_wdata  (arb_ram_wdata),
+        .ram_be     (arb_ram_be),
+        .ram_burst  (arb_ram_burst),
+        .ram_wdata3 (arb_ram_wdata3),
+        .ram_ifill  (arb_ram_ifill),
+        .ram_dfill  (arb_ram_dfill),
+        .ram_rdata  (arb_ram_rdata),
+        .ram_ack    (arb_ram_ack),
+        .ram_last   (arb_ram_last),
 
         .dbg_cpu_wait(arb_cpu_wait),
         .dbg_dma_go  (arb_dma_go),
@@ -638,6 +675,42 @@ module sgi_indy #(
         .dbg_pf_fill (arb_pf_fill),
         .dbg_dpf_hit (arb_dpf_hit),
         .dbg_dpf_fill(arb_dpf_fill)
+    );
+
+    l2_cache u_l2 (
+        .clk        (clk),
+        .reset      (reset),
+        .enable     (l2_enable),
+        .ext_inval  (ex_inval),
+
+        .up_req     (arb_ram_req),
+        .up_we      (arb_ram_we),
+        .up_addr    (arb_ram_addr),
+        .up_wdata   (arb_ram_wdata),
+        .up_be      (arb_ram_be),
+        .up_burst   (arb_ram_burst),
+        .up_wdata3  (arb_ram_wdata3),
+        .up_ifill   (arb_ram_ifill),
+        .up_dfill   (arb_ram_dfill),
+        .up_rdata   (arb_ram_rdata),
+        .up_ack     (arb_ram_ack),
+        .up_last    (arb_ram_last),
+
+        .dn_req     (ram_req),
+        .dn_we      (ram_we),
+        .dn_addr    (ram_addr),
+        .dn_wdata   (ram_wdata),
+        .dn_be      (ram_be),
+        .dn_burst   (ram_burst),
+        .dn_wdata3  (ram_wdata3),
+        .dn_rdata   (ram_rdata),
+        .dn_ack     (ram_ack),
+        .dn_last    (ram_last),
+
+        .dbg_hit_i  (l2_hit_i),
+        .dbg_hit_d  (l2_hit_d),
+        .dbg_fill_i (l2_fill_i),
+        .dbg_fill_d (l2_fill_d)
     );
 
     // The engine's addresses are physical, so they go through the same MEMCFG
@@ -779,6 +852,8 @@ module sgi_indy #(
     logic [63:0] hpc3_rdata;
     logic        hpc3_ack;
 
+    wire enet_irq;
+
     sgi_hpc3 #(.AUDIO_CLK_HZ(AUDIO_CLK_HZ)) u_hpc3 (
         .clk     (clk),
         .reset   (reset),
@@ -816,7 +891,16 @@ module sgi_indy #(
         .audio_en        (audio_en),
         .audio_l         (audio_l),
         .audio_r         (audio_r),
-        .dbg_audio       (dbg_audio_bcn)
+        .dbg_audio       (dbg_audio_bcn),
+
+        .ex_rd           (ex_rd),
+        .ex_wr           (ex_wr),
+        .ex_idx          (ex_idx),
+        .ex_seq          (ex_seq),
+        .ex_wdata        (ex_wdata),
+        .ex_rdata        (ex_rdata),
+        .ex_done         (ex_done),
+        .enet_irq        (enet_irq)
     );
 
     //------------------------------------------------------------------
@@ -930,7 +1014,6 @@ module sgi_indy #(
         .sd_buff_dout (scsi_sd_buff_dout),
         .sd_buff_din  (scsi_sd_buff_din),
         .sd_buff_wr   (scsi_sd_buff_wr),
-        .cache_bypass (scsi_cache_bypass),
         .din_lookahead_en (scsi_din_lookahead),
         .din_strict   (scsi_din_strict),
         .dbg_bcn      (dbg_scsi_bcn),
@@ -977,7 +1060,9 @@ module sgi_indy #(
         // latch, set per retrace and cleared by the CPU's STATUS read -
         // which is what retires the interrupt. Wiring the raw vblank level
         // here instead starved the machine (docs/design/newport-vdma.md, build 12).
-        .l0_source ({3'b000, mc_dma_int, 2'b00,
+        // L0 bit 3 is the Ethernet: the SEEQ's status and HPC3's XIE, from
+        // sgi_hpc3's window.
+        .l0_source ({3'b000, mc_dma_int, enet_irq, 1'b0,
                      scsi_irq | scsi_dma_irq, 1'b0}),
         .l1_source ({np_vblank, 7'h00}),
         // The SCC and the keyboard controller are mappable sources, not local
@@ -986,7 +1071,8 @@ module sgi_indy #(
         // active low, as the Z8530's INT pin is.
         .map_source ({2'b00, ~scc_int_n, kbd_irq | mouse_irq, 4'h0}),
         .irq_lines (irq_lines),
-        .int2_state (int2_state_o)
+        .int2_state (int2_state_o),
+        .power_off  (power_off)
     );
 
     assign irq_lines_o = irq_lines;
@@ -1088,10 +1174,13 @@ module sgi_indy #(
             if (cpu_perf[9])            pc_icached    <= pc_icached + 32'd1;
             if (arb_cpu_wait)           pc_arb_wait   <= pc_arb_wait + 38'd1;
             if (arb_dma_go)             pc_dma_n      <= pc_dma_n + 32'd1;
-            if (arb_pf_hit)             pc_pf_hits    <= pc_pf_hits + 32'd1;
-            if (arb_pf_fill)            pc_pf_fills   <= pc_pf_fills + 32'd1;
-            if (arb_dpf_hit)            pc_dpf_hits   <= pc_dpf_hits + 32'd1;
-            if (arb_dpf_fill)           pc_dpf_fills  <= pc_dpf_fills + 32'd1;
+            // With the second level on (build 56) these count its hits and
+            // its fetches instead: the buffers are off, the words keep their
+            // meaning of "fills answered on chip / fills that went to DDR3".
+            if (arb_pf_hit  | l2_hit_i)  pc_pf_hits    <= pc_pf_hits + 32'd1;
+            if (arb_pf_fill | l2_fill_i) pc_pf_fills   <= pc_pf_fills + 32'd1;
+            if (arb_dpf_hit | l2_hit_d)  pc_dpf_hits   <= pc_dpf_hits + 32'd1;
+            if (arb_dpf_fill | l2_fill_d) pc_dpf_fills <= pc_dpf_fills + 32'd1;
         end
     end
 

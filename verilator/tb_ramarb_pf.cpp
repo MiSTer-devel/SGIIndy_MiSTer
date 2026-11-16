@@ -155,6 +155,13 @@ int main(int argc, char **argv)
     rng.seed(envi("SEED", 1));
     dut = new Vram_arb;
     dut->pf_enable = envi("IPF", 1); dut->dpf_enable = envi("DPF", 1);
+#ifdef L2WRAP
+    // l2test: the same bench through ramarb_l2 (ram_arb + l2_cache). L2OFF=1
+    // bypasses the second level, INVAL=n pulses ext_inval about once in n
+    // clocks (Main writing guest RAM).
+    dut->l2_disable = envi("L2OFF", 0);
+    const int INVAL = envi("INVAL", 0);
+#endif
     dut->reset = 1; dut->clk = 0;
     for (int i = 0; i < 8; i++) { dut->clk = 1; dut->eval(); dut->clk = 0; dut->eval(); }
     dut->reset = 0;
@@ -172,6 +179,9 @@ int main(int argc, char **argv)
         }
         if (!dma.active && (int)(rng() % 100) < DMA_PCT) new_dma_tx();
         dut->dma_req = dma.active; dut->dma_we = dma.we; dut->dma_addr = dma.addr;
+#ifdef L2WRAP
+        dut->ext_inval = INVAL ? ((int)(rng() % INVAL) == 0) : 0;
+#endif
         dut->dma_wdata = dma.wdata; dut->dma_be = dma.be;
 
         // ---- the port's answer for this clock

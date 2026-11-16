@@ -46,9 +46,9 @@
 # --stats (build 26 and later, docs/design/scsi-block-cache.md) reads the SCSI disk-time counters out
 # of the DDR3 beacon at every 20 s poll (bcnread.py --stats) and logs them
 # with the verdict: HPS transactions, HPS-busy and target-wait seconds, bus
-# and DATA-phase seconds, bytes, the block cache's hits/misses/writes. The
-# counters start at core launch, so the line at X-UP is the boot's disk
-# time. Run it with scripts/setopt.sh scsicache=on and =off for the pair.
+# and DATA-phase seconds, bytes (and up to build 51 the block cache's
+# hits/misses/writes, zero since). The counters start at core launch, so the
+# line at X-UP is the boot's disk time.
 #
 # Output: one line per boot and a tally, also appended to
 # tests/out/hw/irixrate-<tag>.log.
