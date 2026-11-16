@@ -2270,8 +2270,25 @@ begin
    -- running from 64 bit sections currently not fully supported to not screw up FPGA route timing
    -- kusegUnmapped is Status.ERL: while it is set, region < 4 is unmapped and the
    -- TLB must not be consulted for it. See the note in cpu_cop0.vhd.
+   -- SGI: KERNEL FETCHES FROM KSEG2/KSEG3 WITH Status.KX = 1 ARE MAPPED. In the
+   -- 64-bit address map the old 32-bit KSEG2/KSEG3 live on as cksseg/ckseg3,
+   -- 0xFFFFFFFF_C0000000 and up, and they are TLB-mapped; the data side has
+   -- always said so (region_TLBmapped, the last two arms of the Kernel table
+   -- below). The fetch side mapped only `(63 downto 60) < 8` - xkuseg and
+   -- xksseg - so a Kernel-mode fetch from 0xFFFFFFFF_C01D6958 went out as an
+   -- UNMAPPED physical access to 0x001D6958 and executed whatever answered.
+   -- IRIX 6.5 runs its kernel threads with KX = 1 (SR 0xff83 in the panic
+   -- frame) and its loadable modules live in KSEG2: munldd's call into
+   -- midi_unload fetched 0xFFFFFFFF, `sd ra,-1(ra)`, and panicked every boot
+   -- with a Write Address Error at BadVAddr = ra - 1 (cpu-tests:
+   -- umode/k2_jalr_miss, the KX = 1 cases). Four address bits, not the full
+   -- 34-bit compare, for this path's timing: bits 63:62 = "11" leaves out
+   -- xkphys (0x8..0xB, bit 62 clear) and bits 31:30 = "11" leaves out
+   -- ckseg0/ckseg1; what remains is cksseg, ckseg3 and the top of xkseg, all
+   -- of them mapped.
    TLB_instrMapped1 <= '0' when INSTR_KSEG_ONLY else
                        '1' when (region64 = '1' and FetchAddr1(63 downto 60) < 8 and kusegUnmapped = '0') else
+                       '1' when (region64 = '1' and privilegeMode = "00" and FetchAddr1(63 downto 62) = "11" and FetchAddr1(31 downto 30) = "11") else
                        '1' when (region64 = '0' and privilegeMode = "00" and ((FetchAddr1(31 downto 29) < 4 and kusegUnmapped = '0') or FetchAddr1(31 downto 29) = 6 or FetchAddr1(31 downto 29) = 7)) else
                        '1' when (region64 = '0' and privilegeMode = "01" and ((FetchAddr1(31 downto 29) < 4 and kusegUnmapped = '0') or FetchAddr1(31 downto 29) = 6)) else
                        '1' when (region64 = '0' and privilegeMode = "10" and (FetchAddr1(31 downto 29) < 4 and kusegUnmapped = '0')) else
@@ -2279,6 +2296,7 @@ begin
 
    TLB_instrMapped2 <= '0' when INSTR_KSEG_ONLY else
                        '1' when (region64 = '1' and FetchAddr2(63 downto 60) < 8 and kusegUnmapped = '0') else
+                       '1' when (region64 = '1' and privilegeMode = "00" and FetchAddr2(63 downto 62) = "11" and FetchAddr2(31 downto 30) = "11") else
                        '1' when (region64 = '0' and privilegeMode = "00" and ((FetchAddr2(31 downto 29) < 4 and kusegUnmapped = '0') or FetchAddr2(31 downto 29) = 6 or FetchAddr2(31 downto 29) = 7)) else
                        '1' when (region64 = '0' and privilegeMode = "01" and ((FetchAddr2(31 downto 29) < 4 and kusegUnmapped = '0') or FetchAddr2(31 downto 29) = 6)) else
                        '1' when (region64 = '0' and privilegeMode = "10" and (FetchAddr2(31 downto 29) < 4 and kusegUnmapped = '0')) else
