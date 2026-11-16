@@ -229,6 +229,14 @@ tb_scsi_lun:
 	   --Mdir ./obj_dir_tbslun -o tb_scsi_lun tb_scsi_lun.sv $(RTL)/scsi/scsi.v $(RTL)/scsi/cd_audio.sv
 	./obj_dir_tbslun/tb_scsi_lun
 
+# --- the CD-ROM target's READ TOC: one data track, LBA and MSF, formats 0/1/2 ---
+# IRIX 6.2 took the all-zero TOC for an audio CD (track 1 CONTROL 0).
+#   make -C verilator tb_cdtoc
+tb_cdtoc:
+	$V --binary --timing $(TBC_W) +incdir+$(RTL)/scsi -fno-gate --top-module tb_cdtoc \
+	   --Mdir ./obj_dir_tbcdtoc -o tb_cdtoc tb_cdtoc.sv $(RTL)/scsi/scsi.v $(RTL)/scsi/cd_audio.sv
+	./obj_dir_tbcdtoc/tb_cdtoc
+
 # --- ram_arb's instruction prefetch buffer against a memory with contents -----
 # Every word handed to the CPU must be what memory held, with the CPU storing
 # into the buffered lines and a DMA master writing underneath (build 46).
